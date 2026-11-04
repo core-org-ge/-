@@ -1,0 +1,10 @@
+{
+  "name": "exam-server",
+  "version": "1.0.0",
+  "description": "საგამოცდო სისტემის ცენტრალური სერვერი",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}

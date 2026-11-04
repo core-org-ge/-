@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>არქიტექტორებისა და ინჟინერ-მშენებლების სერტიფიცირების საგამოცდო სისტემა</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+  <!-- აპლიკაციის მთავარი კონტეინერი -->
+  <div id="app"></div>
+
+  <!-- მოდულური საინჟინრო კალკულატორი -->
+  <div id="calcModalContainer" class="calc-container"></div>
+
+  <!-- მონაცემთა ბაზა და დინამიური გენერატორი (ოფლაინ რეჟიმის გარანტიით) -->
+  <script src="data/structure.js"></script>
+  <script src="data/question-generator.js"></script>
+  <script src="data/questions-arch.js"></script>
+  <script src="data/questions-struct.js"></script>
+
+  <!-- ძრავა და ლოგიკა -->
+  <script src="js/exam-engine.js"></script>
+  <script src="js/calculator.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

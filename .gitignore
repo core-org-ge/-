@@ -1,0 +1,10 @@
+# Node & Dependencies
+node_modules/
+package-lock.json
+
+# Temporary & build archives
+*.zip
+*.log
+
+# Sensitive local data
+server/db.json
