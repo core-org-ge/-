@@ -515,7 +515,7 @@ class ExamUI {
     };
 
     this.engine.onTimeUp = () => {
-      alert("საგამოცდო დრო (180 წთ) ამოიწურა! თქვენი ნაშრომი გადაგზავნილია შესაფასებლად.");
+      alert("საგამოცდო დრო (120 წთ) ამოიწურა! თქვენი ნაშრომი გადაგზავნილია შესაფასებლად.");
       this.renderResults();
     };
   }
@@ -984,12 +984,12 @@ class ExamUI {
                   </div>
                   <div class="crit-row">
                     <span class="crit-label">ფორმატი და დრო:</span>
-                    <span class="crit-val">100 კითხვა • 180 წუთი (3 საათი) • CBT</span>
+                    <span class="crit-val">100 კითხვა • 120 წუთი (2 საათი) • CBT</span>
                   </div>
                 </div>
                 <div class="card-actions">
                   <button class="btn btn-primary start-exam-btn" data-id="${p.id}" data-mode="exam">
-                    საგამოცდო რეჟიმი (180 წთ, 100 კითხვა)
+                    საგამოცდო რეჟიმი (120 წთ, 100 კითხვა)
                   </button>
                   ${savedStudy && answeredCount > 0 ? `
                     <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
@@ -1036,7 +1036,7 @@ class ExamUI {
             <div class="rule-item">
               <span class="rule-icon">⏱️</span>
               <div>
-                <strong>დროის რეგლამენტი და შეფასება:</strong> საგამოცდო დრო შეადგენს 180 წუთს (3 საათი). დროის ამოწურვისას ნაშრომი ავტომატურად იგზავნება და გენერირდება დეტალური უწყისი.
+                <strong>დროის რეგლამენტი და შეფასება:</strong> საგამოცდო დრო შეადგენს 120 წუთს (2 საათი). დროის ამოწურვისას ნაშრომი ავტომატურად იგზავნება და გენერირდება დეტალური უწყისი.
               </div>
             </div>
           </div>
@@ -1139,7 +1139,7 @@ class ExamUI {
             ` : `
               <div class="timer-box" id="timerBox">
                 <span class="timer-icon">⏱️</span>
-                <span id="timerDigits" class="timer-digits">03:00:00</span>
+                <span id="timerDigits" class="timer-digits">02:00:00</span>
               </div>
             `}
           </div>
@@ -1150,6 +1150,9 @@ class ExamUI {
                 💾 შენახვა და გასვლა
               </button>
             ` : ''}
+            <button id="docsToggleBtn" class="btn btn-secondary" style="margin-right:8px;font-weight:700;background:#eff6ff;border:1.5px solid #3b82f6;color:#1d4ed8;" title="ოფიციალური საგამოცდო დოკუმენტაცია">
+              📖 საგამოცდო დოკუმენტაცია
+            </button>
             <button id="calcToggleBtn" class="btn btn-icon" title="საინჟინრო კალკულატორი">
               ⚙️ კალკულატორი
             </button>
@@ -1209,6 +1212,10 @@ class ExamUI {
     `;
 
     // კალკულატორის გახსნა
+    const docsBtn = document.getElementById('docsToggleBtn');
+    if (docsBtn) {
+      docsBtn.addEventListener('click', () => this.renderDocsModal());
+    }
     const calcBtn = document.getElementById('calcToggleBtn');
     if (calcBtn) {
       calcBtn.addEventListener('click', () => this.calculator.toggle());
@@ -1339,7 +1346,8 @@ class ExamUI {
 
     card.innerHTML = `
       <div class="q-meta-row">
-        <span class="q-number-pill">კითხვა №${exam.currentIndex + 1}</span>
+        <span class="q-number-pill">კითხვა №${exam.currentIndex + 1} / ${exam.questions.length}</span>
+        <span class="q-code-pill" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:3px 8px;border-radius:4px;font-weight:700;font-size:12px;">კოდი ${q.code || (79000 + exam.currentIndex + 1)}</span>
         <span class="q-diff-pill ${q.difficulty || exam.difficulty || 'easy'}">
           ${(q.difficulty === 'hard' || exam.difficulty === 'hard') ? '🔴 რთული კაზუსი' : ((q.difficulty === 'medium' || exam.difficulty === 'medium') ? '🟡 საშუალო' : '🟢 მარტივი')}
         </span>

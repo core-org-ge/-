@@ -7,7 +7,7 @@ window.EXAM_STRUCTURE = {
       "qualification": "ბაკალავრი (არქიტექტურა) + ≥3 წელი სტაჟი (ბოლო 2 წელი უწყვეტი)",
       "passing_score_subchapter": 0.70,
       "total_questions": 100,
-      "time_minutes": 180,
+      "time_minutes": 120,
       "field": "architecture"
     },
     "arch_expert": {
@@ -17,7 +17,7 @@ window.EXAM_STRUCTURE = {
       "qualification": "მაგისტრი (არქიტექტურა) + ≥10 წელი სტაჟი (ბოლო 2 წელი უწყვეტი ექსპერტად)",
       "passing_score_subchapter": 0.75,
       "total_questions": 100,
-      "time_minutes": 180,
+      "time_minutes": 120,
       "field": "architecture"
     },
     "struct_main": {
@@ -27,7 +27,7 @@ window.EXAM_STRUCTURE = {
       "qualification": "ბაკალავრი (მშენებლობის ინჟინერია) + ≥3 წელი სტაჟი (ბოლო 2 წელი უწყვეტი)",
       "passing_score_subchapter": 0.70,
       "total_questions": 100,
-      "time_minutes": 180,
+      "time_minutes": 120,
       "field": "structure"
     },
     "struct_expert": {
@@ -37,7 +37,7 @@ window.EXAM_STRUCTURE = {
       "qualification": "მაგისტრი (მშენებლობის ინჟინერია) + ≥10 წელი სტაჟი (ბოლო 2 წელი უწყვეტი ექსპერტად)",
       "passing_score_subchapter": 0.75,
       "total_questions": 100,
-      "time_minutes": 180,
+      "time_minutes": 120,
       "field": "structure"
     }
   },
