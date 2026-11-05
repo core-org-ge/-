@@ -233,6 +233,8 @@ class ExamUI {
       const payload = {
         profileId: exam.profileId,
         currentIndex: exam.currentIndex,
+        difficulty: exam.difficulty || 'easy',
+        difficultyTitle: exam.difficultyTitle || 'მარტივი',
         userAnswers: exam.userAnswers || {},
         flagged: Array.from(exam.flagged || []),
         questions: exam.questions,
@@ -264,6 +266,46 @@ class ExamUI {
     } catch(e) {}
   }
 
+  getDifficulty() {
+    return localStorage.getItem('exam_difficulty') || 'easy';
+  }
+
+  setDifficulty(diff) {
+    if (!['easy', 'medium', 'hard'].includes(diff)) diff = 'easy';
+    localStorage.setItem('exam_difficulty', diff);
+  }
+
+  getDifficultyMeta(diff = null) {
+    const d = diff || this.getDifficulty();
+    const map = {
+      easy: {
+        id: 'easy',
+        title: 'მარტივი',
+        badge: '🟢 მარტივი',
+        badgeHtml: '<span class="diff-badge diff-easy">🟢 მარტივი</span>',
+        hint: 'საბაზისო დონე — სტანდარტული კითხვები და ნორმატიული განმარტებები (არსებული ბაზა)',
+        class: 'diff-easy'
+      },
+      medium: {
+        id: 'medium',
+        title: 'საშუალო',
+        badge: '🟡 საშუალო',
+        badgeHtml: '<span class="diff-badge diff-medium">🟡 საშუალო</span>',
+        hint: 'საშუალო დონე — პრაქტიკული ქეისები, სიტუაციური შეზღუდვები და გაანგარიშებითი ნორმები',
+        class: 'diff-medium'
+      },
+      hard: {
+        id: 'hard',
+        title: 'რთული',
+        badge: '🔴 რთული 🔥',
+        badgeHtml: '<span class="diff-badge diff-hard">🔴 რთული 🔥</span>',
+        hint: 'ექსტრემალური დონე — ურთულესი ჩამჭრელი კაზუსები, რთული ფორმულები და მკაცრი გამონაკლისები',
+        class: 'diff-hard'
+      }
+    };
+    return map[d] || map.easy;
+  }
+
   resumeStudy(profileId) {
     const saved = this.getSavedStudyProgress(profileId);
     if (!saved) {
@@ -274,11 +316,15 @@ class ExamUI {
     const profile = this.engine.structure.profiles[profileId];
     const syllabi = this.engine.structure.syllabi || this.engine.structure.curricula;
     const curriculum = syllabi[profile.field];
+    const diff = saved.difficulty || 'easy';
+    const diffTitles = { easy: 'მარტივი', medium: 'საშუალო', hard: 'რთული' };
 
     this.engine.currentExam = {
       profileId,
       profile,
       mode: 'study',
+      difficulty: diff,
+      difficultyTitle: saved.difficultyTitle || diffTitles[diff] || 'მარტივი',
       curriculum,
       questions: saved.questions,
       userAnswers: saved.userAnswers || {},
@@ -796,6 +842,9 @@ class ExamUI {
     const showSignedBanner = Boolean(this.justSignedIn);
     this.justSignedIn = false;
 
+    const currentDiff = this.getDifficulty();
+    const diffMeta = this.getDifficultyMeta(currentDiff);
+
     app.innerHTML = `
       <div class="home-container">
         <!-- ზედა მართვის ზოლი -->
@@ -811,6 +860,26 @@ class ExamUI {
             </button>` : ''}
             ${isSigned ? `<button class="btn btn-subtle" id="btnSignOutCand" style="padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;color:#dc2626;border:1px solid #fecaca;background:#fef2f2;cursor:pointer;">🚪 გასვლა</button>` : ''}
           </div>
+
+          <!-- სირთულის 3-პოზიციიანი გადამრთველი (მარტივი, საშუალო, რთული) ადმინ პანელის ზოლზე -->
+          <div class="diff-nav-wrapper" id="diffNavWrapper">
+            <span class="diff-nav-title">🎯 სირთულე:</span>
+            <div class="diff-segmented-group" role="radiogroup" aria-label="სირთულის დონე">
+              <button type="button" class="btn-diff-segment ${currentDiff === 'easy' ? 'active diff-easy' : ''}" data-diff="easy" title="მარტივი — საბაზისო კითხვები და სტანდარტული განმარტებები (არსებული ბაზა)">
+                <span class="diff-dot-icon">🟢</span>
+                <span class="diff-name">მარტივი</span>
+              </button>
+              <button type="button" class="btn-diff-segment ${currentDiff === 'medium' ? 'active diff-medium' : ''}" data-diff="medium" title="საშუალო — გაღრმავებული პრაქტიკული ქეისები და შეზღუდვები">
+                <span class="diff-dot-icon">🟡</span>
+                <span class="diff-name">საშუალო</span>
+              </button>
+              <button type="button" class="btn-diff-segment ${currentDiff === 'hard' ? 'active diff-hard' : ''}" data-diff="hard" title="რთული — ექსტრემალური/უმაღლესი სირთულე, ჩამჭრელი კაზუსები და რთული ფორმულები">
+                <span class="diff-dot-icon">🔴</span>
+                <span class="diff-name">რთული 🔥</span>
+              </button>
+            </div>
+          </div>
+
           <div class="admin-bar">
             <button class="btn btn-admin" id="btnAdminLogin">🔐 ადმინ პანელი</button>
           </div>
@@ -843,6 +912,10 @@ class ExamUI {
                 <div class="card-field-tag ${p.field}">${p.field === 'architecture' ? 'არქიტექტურა' : 'კონსტრუქცია'}</div>
                 <h3 class="profile-name">${p.title}</h3>
                 <div class="profile-criteria">
+                  <div class="crit-row" style="background:${currentDiff === 'hard' ? '#fef2f2' : (currentDiff === 'medium' ? '#fffbeb' : '#ecfdf5')};padding:6px 10px;border-radius:6px;border:1px solid ${currentDiff === 'hard' ? '#fca5a5' : (currentDiff === 'medium' ? '#fde68a' : '#a7f3d0')};">
+                    <span class="crit-label" style="font-weight:700;color:${currentDiff === 'hard' ? '#991b1b' : (currentDiff === 'medium' ? '#92400e' : '#065f46')};">სირთულის დონე:</span>
+                    <span class="crit-val">${diffMeta.badgeHtml}</span>
+                  </div>
                   <div class="crit-row">
                     <span class="crit-label">საკვალიფიკაციო მოთხოვნა:</span>
                     <span class="crit-val">${p.qualification}</span>
@@ -928,6 +1001,14 @@ class ExamUI {
       this.promptAdminLogin();
     };
 
+    app.querySelectorAll('.btn-diff-segment').forEach(btn => {
+      btn.onclick = () => {
+        const d = btn.getAttribute('data-diff');
+        this.setDifficulty(d);
+        this.renderHome();
+      };
+    });
+
     app.querySelectorAll('.start-exam-btn, .start-study-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const profileId = e.currentTarget.getAttribute('data-id');
@@ -970,7 +1051,8 @@ class ExamUI {
   }
 
   startTest(profileId, mode) {
-    this.engine.startExam(profileId, mode);
+    const diff = this.getDifficulty();
+    this.engine.startExam(profileId, mode, diff);
     this.renderExamInterface();
   }
 
@@ -985,6 +1067,7 @@ class ExamUI {
           <div class="header-left">
             <span class="badge profile-badge">${exam.profile.title}</span>
             <span class="badge mode-badge ${exam.mode}">${exam.mode === 'exam' ? 'საგამოცდო რეჟიმი' : 'სასწავლო რეჟიმი'}</span>
+            <span class="badge diff-badge ${exam.difficulty || 'easy'}">${exam.difficulty === 'hard' ? '🔴 რთული 🔥' : (exam.difficulty === 'medium' ? '🟡 საშუალო' : '🟢 მარტივი')}</span>
             <span class="badge candidate-badge" style="background:#ecfdf5;color:#065f46;border:1.5px solid #10b981;font-weight:700;">🟢 ავტორიზებულია: ${this.candidate ? this.escapeHtml(this.candidate.name) : ''}</span>
             <span class="passing-rule-hint">ბარიერი: ≥ ${(exam.profile.passing_score_subchapter * 100).toFixed(0)}% ქვეთავში</span>
           </div>
@@ -1199,6 +1282,9 @@ class ExamUI {
     card.innerHTML = `
       <div class="q-meta-row">
         <span class="q-number-pill">კითხვა №${exam.currentIndex + 1}</span>
+        <span class="q-diff-pill ${q.difficulty || exam.difficulty || 'easy'}">
+          ${(q.difficulty === 'hard' || exam.difficulty === 'hard') ? '🔴 რთული კაზუსი' : ((q.difficulty === 'medium' || exam.difficulty === 'medium') ? '🟡 საშუალო' : '🟢 მარტივი')}
+        </span>
         <span class="q-required-pill ${reqChoices > 1 ? 'multi' : 'single'}">
           ${reqChoices > 1 ? `⚠️ აირჩიეთ ${reqChoices} სწორი პასუხი` : `აირჩიეთ 1 სწორი პასუხი`}
         </span>
@@ -1572,6 +1658,8 @@ class ExamUI {
         candidatePhone: this.candidate ? (this.candidate.phone || '') : '',
         profileId: res.profileId,
         profileTitle: res.profileTitle,
+        difficulty: this.engine.currentExam.difficulty || 'easy',
+        difficultyTitle: this.engine.currentExam.difficultyTitle || (this.engine.currentExam.difficulty === 'hard' ? 'რთული' : (this.engine.currentExam.difficulty === 'medium' ? 'საშუალო' : 'მარტივი')),
         mode: this.engine.currentExam.mode === 'exam' ? 'საგამოცდო' : 'სასწავლო',
         score: res.totalEarned,
         total: res.totalQuestions,
@@ -1663,6 +1751,14 @@ class ExamUI {
           <div class="stat-card">
             <span class="stat-label">საგამოცდო პროფილი:</span>
             <span class="stat-value small">${res.profileTitle}</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">სირთულის დონე:</span>
+            <span class="stat-value small">
+              <span class="diff-badge ${this.engine.currentExam.difficulty || 'easy'}">
+                ${this.engine.currentExam.difficultyTitle || 'მარტივი'}
+              </span>
+            </span>
           </div>
           <div class="stat-card">
             <span class="stat-label">საერთო ქულა:</span>
@@ -1933,6 +2029,7 @@ class ExamUI {
                 <th>კანდიდატი</th>
                 <th>Gmail მისამართი</th>
                 <th>პროფილი</th>
+                <th>სირთულე</th>
                 <th>რეჟიმი</th>
                 <th>ქულა / 100</th>
                 <th>სტატუსი</th>
@@ -1943,7 +2040,7 @@ class ExamUI {
             <tbody>
               ${journal.length === 0 ? `
                 <tr>
-                  <td colspan="10" style="text-align:center;padding:40px;color:#64748b;">
+                  <td colspan="11" style="text-align:center;padding:40px;color:#64748b;">
                     საგამოცდო ჟურნალი ცარიელია. შედეგები ავტომატურად გამოჩნდება ტესტების ჩაბარებისთანავე.
                   </td>
                 </tr>
@@ -1954,6 +2051,7 @@ class ExamUI {
                   <td><strong>${this.escapeHtml(row.candidateName)}</strong></td>
                   <td><a href="mailto:${this.escapeHtml(row.candidateEmail)}" style="color:#2563eb;text-decoration:none;">${this.escapeHtml(row.candidateEmail)}</a></td>
                   <td>${this.escapeHtml(row.profileTitle)}</td>
+                  <td><span class="badge diff-badge-sm ${row.difficulty || 'easy'}">${row.difficultyTitle || (row.difficulty === 'hard' ? '🔴 რთული' : (row.difficulty === 'medium' ? '🟡 საშუალო' : '🟢 მარტივი'))}</span></td>
                   <td><span class="badge ${row.mode === 'საგამოცდო' ? 'exam' : 'study'}">${row.mode}</span></td>
                   <td><strong>${row.score} / ${row.total}</strong> (${row.percent}%)</td>
                   <td>
@@ -2126,11 +2224,12 @@ class ExamUI {
 
     // UTF-8 with BOM ქართული Excel-ის მხარდაჭერისთვის
     let csv = '\uFEFF';
-    csv += 'ID;თარიღი და დრო;კანდიდატის სახელი;Gmail მისამართი;საგამოცდო პროფილი;რეჟიმი;ქულა;სულ;პროცენტი;სტატუსი;დახარჯული დრო (წთ)\r\n';
+    csv += 'ID;თარიღი და დრო;კანდიდატის სახელი;Gmail მისამართი;საგამოცდო პროფილი;სირთულე;რეჟიმი;ქულა;სულ;პროცენტი;სტატუსი;დახარჯული დრო (წთ)\r\n';
 
     journal.forEach(row => {
       const statusTxt = row.passed ? 'ჩაბარებულია' : 'ჩაჭრილია';
-      csv += `"${row.id}";"${row.date}";"${row.candidateName}";"${row.candidateEmail}";"${row.profileTitle}";"${row.mode}";"${row.score}";"${row.total}";"${row.percent}%";"${statusTxt}";"${row.timeSpentMinutes}"\r\n`;
+      const diffTxt = row.difficultyTitle || (row.difficulty === 'hard' ? 'რთული' : (row.difficulty === 'medium' ? 'საშუალო' : 'მარტივი'));
+      csv += `"${row.id}";"${row.date}";"${row.candidateName}";"${row.candidateEmail}";"${row.profileTitle}";"${diffTxt}";"${row.mode}";"${row.score}";"${row.total}";"${row.percent}%";"${statusTxt}";"${row.timeSpentMinutes}"\r\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

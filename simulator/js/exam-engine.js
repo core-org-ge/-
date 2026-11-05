@@ -26,7 +26,7 @@ class ExamEngine {
    * @param {string} profileId - arch_main | arch_expert | struct_main | struct_expert
    * @param {string} mode - 'exam' | 'study'
    */
-  startExam(profileId, mode = 'exam') {
+  startExam(profileId, mode = 'exam', difficulty = 'easy') {
     const profile = this.structure.profiles[profileId];
     if (!profile) throw new Error(`უცნობი პროფილი: ${profileId}`);
 
@@ -34,13 +34,18 @@ class ExamEngine {
     const curriculum = syllabi[profile.field];
     const bank = profile.field === 'architecture' ? this.archBank : this.structBank;
 
-    const selectedQuestions = this._generateQuotaExam(curriculum, bank, profile.field);
+    const diff = (difficulty && ['easy', 'medium', 'hard'].includes(difficulty)) ? difficulty : 'easy';
+    const diffTitles = { easy: 'მარტივი', medium: 'საშუალო', hard: 'რთული' };
+
+    const selectedQuestions = this._generateQuotaExam(curriculum, bank, profile.field, diff);
     const durationMinutes = profile.time_minutes || (this.structure.exam_meta && this.structure.exam_meta.duration_minutes) || 180;
 
     this.currentExam = {
       profileId,
       profile,
       mode,
+      difficulty: diff,
+      difficultyTitle: diffTitles[diff],
       curriculum,
       questions: selectedQuestions,
       userAnswers: {}, // { index: [selectedOptionIndices] }
@@ -61,13 +66,18 @@ class ExamEngine {
   }
 
   /**
-   * აგენერირებს 100 უნიკალურ კითხვას ქვეთავების ოფიციალური კვოტების მკაცრი დაცვით
+   * აგენერირებს 100 უნიკალურ კითხვას ქვეთავების ოფიციალური კვოტების მკაცრი დაცვითა და სირთულის მიხედვით
    */
-  _generateQuotaExam(curriculum, bank, field) {
+  _generateQuotaExam(curriculum, bank, field, difficulty = 'easy') {
     const examQuestions = [];
     const globalUsedTexts = new Set();
     const recentKeys = this._getRecentTemplateKeys(field);
     const newlyUsedKeys = [];
+
+    // სირთულეების სპეციფიკური ბანკები
+    const isArch = field === 'architecture';
+    const hardBank = isArch ? (window.QUESTIONS_ARCH_HARD || []) : (window.QUESTIONS_STRUCT_HARD || []);
+    const mediumBank = isArch ? (window.QUESTIONS_ARCH_MEDIUM || []) : (window.QUESTIONS_STRUCT_MEDIUM || []);
 
     curriculum.chapters.forEach(chapter => {
       const chapterQuestions = [];
@@ -76,21 +86,36 @@ class ExamEngine {
         const quota = sub.quota;
         if (!quota || quota <= 0) return;
 
-        // 1. სტატიკური კითხვები ამ ქვეთავისთვის
-        const staticPool = bank
-          .filter(q => q.subchapter_id === sub.id)
-          .map(q => ({
-            ...JSON.parse(JSON.stringify(q)),
-            templateKey: q.templateKey || q.id
-          }));
+        // 1. სტატიკური კითხვები შესაბამისი სირთულის მიხედვით პრიორიტეტით
+        let targetStatic = [];
+        let fallbackStatic = [];
+
+        if (difficulty === 'hard') {
+          targetStatic = hardBank.filter(q => q.subchapter_id === sub.id);
+          fallbackStatic = mediumBank.filter(q => q.subchapter_id === sub.id).concat(bank.filter(q => q.subchapter_id === sub.id));
+        } else if (difficulty === 'medium') {
+          targetStatic = mediumBank.filter(q => q.subchapter_id === sub.id);
+          fallbackStatic = bank.filter(q => q.subchapter_id === sub.id);
+        } else {
+          // easy - არსებული საბაზისო კითხვები
+          targetStatic = bank.filter(q => q.subchapter_id === sub.id);
+          fallbackStatic = [];
+        }
+
+        const staticPool = [...targetStatic, ...fallbackStatic].map(q => ({
+          ...JSON.parse(JSON.stringify(q)),
+          templateKey: q.templateKey || q.id,
+          difficulty: q.difficulty || (targetStatic.includes(q) ? difficulty : 'easy')
+        }));
 
         // 2. დინამიური/პარამეტრული გენერატორის სრული უნიკალური პული ამ ქვეთავისთვის
         let dynamicPool = [];
         if (window.QuestionGenerator && typeof window.QuestionGenerator.generateSubchapterPool === 'function') {
-          dynamicPool = window.QuestionGenerator.generateSubchapterPool(sub.id) || [];
+          dynamicPool = window.QuestionGenerator.generateSubchapterPool(sub.id, difficulty) || [];
         }
 
         // 3. გაერთიანება და მკაცრი დედუპლიკაცია ტექსტისა და templateKey-ს მიხედვით
+        // პრიორიტეტი მივანიჭოთ target სირთულის კითხვებს
         const combinedRaw = [...dynamicPool, ...staticPool];
         const uniquePool = [];
         const localSeenKeys = new Set();
@@ -105,8 +130,8 @@ class ExamEngine {
           }
         });
 
-        // 4. კითხვების შერჩევა (უპირატესობა ენიჭება წინა ტესტში გამოუყენებელ კითხვებს + თავობრივ სტრატიფიკაციას)
-        const chosen = this._selectSubchapterQuestions(uniquePool, quota, recentKeys);
+        // 4. კითხვების შერჩევა (უპირატესობა ენიჭება არჩეული სირთულის + წინა ტესტში გამოუყენებელ კითხვებს)
+        const chosen = this._selectSubchapterQuestions(uniquePool, quota, recentKeys, difficulty);
 
         chosen.forEach(rawQ => {
           const normText = rawQ.question.trim().replace(/\s+/g, ' ');
@@ -116,6 +141,8 @@ class ExamEngine {
           const prepared = this._shuffleQuestionOptions(rawQ);
           prepared.chapterName = chapter.name;
           prepared.subchapterName = sub.name;
+          prepared.difficulty = rawQ.difficulty || difficulty;
+          prepared.difficultyTitle = prepared.difficulty === 'hard' ? 'რთული' : (prepared.difficulty === 'medium' ? 'საშუალო' : 'მარტივი');
           chapterQuestions.push(prepared);
         });
       });
@@ -131,17 +158,24 @@ class ExamEngine {
 
   /**
    * ირჩევს quota რაოდენობის კითხვას უნიკალური პულიდან:
-   * - ითვალისწინებს chapter_tag სტრატიფიკაციას (დადგ. №41 და №732-ის ყველა თავის დასაფარად)
+   * - პრიორიტეტს ანიჭებს არჩეული სირთულის კითხვებს
+   * - ითვალისწინებს chapter_tag სტრატიფიკაციას
    * - პრიორიტეტს ანიჭებს წინა ტესტში გამოუყენებელ კითხვებს
    */
-  _selectSubchapterQuestions(uniquePool, quota, recentKeys) {
+  _selectSubchapterQuestions(uniquePool, quota, recentKeys, difficulty = 'easy') {
     if (uniquePool.length <= quota) {
       return this._shuffleArray([...uniquePool]);
     }
 
+    // პირველ რიგში დავახარისხოთ სირთულის მიხედვით (target difficulty პირველად)
+    const matchDiff = uniquePool.filter(q => q.difficulty === difficulty);
+    const otherDiff = uniquePool.filter(q => q.difficulty !== difficulty);
+
+    const sortPool = [...this._shuffleArray(matchDiff), ...this._shuffleArray(otherDiff)];
+
     // დავყოთ ახალ (unseen) და წინა ტესტში ნანახ (seen) კითხვებად
-    const unseen = this._shuffleArray(uniquePool.filter(q => !recentKeys.has(q.templateKey)));
-    const seen = this._shuffleArray(uniquePool.filter(q => recentKeys.has(q.templateKey)));
+    const unseen = sortPool.filter(q => !recentKeys.has(q.templateKey));
+    const seen = sortPool.filter(q => recentKeys.has(q.templateKey));
     const prioritizedPool = [...unseen, ...seen];
 
     // თუ კითხვებს აქვთ chapter_tag (მაგ. arch_4_1 ან arch_4_2), ჯერ თითოეული თავიდან ავიღოთ მინიმუმ 1–2 კითხვა

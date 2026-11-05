@@ -1871,3 +1871,181 @@ body {
   background: #f1f5f9;
   font-weight: 600;
 }
+
+/* ==========================================================================
+   სირთულის დონეების გადამრთველი და ბეჯები (Easy, Medium, Hard)
+   ========================================================================== */
+
+.diff-nav-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #f8fafc;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.diff-nav-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.diff-segmented-group {
+  display: inline-flex;
+  align-items: center;
+  background: #e2e8f0;
+  padding: 3px;
+  border-radius: 9px;
+  gap: 2px;
+}
+
+.btn-diff-segment {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.btn-diff-segment:hover {
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.btn-diff-segment.active.diff-easy {
+  background: #ffffff;
+  color: #047857;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 1.5px #10b981;
+}
+
+.btn-diff-segment.active.diff-medium {
+  background: #ffffff;
+  color: #b45309;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 1.5px #f59e0b;
+}
+
+.btn-diff-segment.active.diff-hard {
+  background: #ffffff;
+  color: #b91c1c;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 1.5px #ef4444;
+  animation: pulse-red-border 2s infinite ease-in-out;
+}
+
+@keyframes pulse-red-border {
+  0%, 100% {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 1.5px #ef4444;
+  }
+  50% {
+    box-shadow: 0 1px 6px rgba(239, 68, 68, 0.35), 0 0 0 2.5px #ef4444;
+  }
+}
+
+.diff-dot-icon {
+  font-size: 11px;
+}
+
+.diff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.diff-badge.diff-easy, .diff-badge.easy {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.diff-badge.diff-medium, .diff-badge.medium {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.diff-badge.diff-hard, .diff-badge.hard {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.diff-badge-sm {
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  display: inline-block;
+}
+
+.diff-badge-sm.easy {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.diff-badge-sm.medium {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.diff-badge-sm.hard {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.q-diff-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.q-diff-pill.easy {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+}
+
+.q-diff-pill.medium {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.q-diff-pill.hard {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1.5px solid #f87171;
+}
+
+@media (max-width: 900px) {
+  .top-nav-bar {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .diff-nav-wrapper {
+    justify-content: center;
+  }
+}
