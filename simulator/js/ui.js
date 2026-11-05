@@ -909,15 +909,15 @@ class ExamUI {
         <!-- ზედა მართვის ზოლი -->
         <div class="top-nav-bar">
           <div class="candidate-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="cand-name" id="homeCandDisplay" style="display:inline-flex;align-items:center;gap:8px;background:${isSigned ? '#ecfdf5' : '#f8fafc'};border:1px solid ${isSigned ? '#6ee7b7' : '#cbd5e1'};padding:6px 12px;border-radius:8px;font-weight:600;font-size:13.5px;color:${isSigned ? '#065f46' : '#475569'};">
-              ${isSigned && this.candidate.picture ? `<img src="${this.escapeHtml(this.candidate.picture)}" alt="" style="width:22px;height:22px;border-radius:50%;">` : ''}
+            <span class="cand-name" id="homeCandDisplay" style="display:inline-flex;align-items:center;gap:8px;background:${isSigned ? '#dafbe1' : '#f6f8fa'};border:1px solid ${isSigned ? '#4ac26b' : '#d0d7de'};padding:5px 12px;border-radius:6px;font-weight:600;font-size:13px;color:${isSigned ? '#1a7f37' : '#57606a'};">
+              ${isSigned && this.candidate.picture ? `<img src="${this.escapeHtml(this.candidate.picture)}" alt="" style="width:20px;height:20px;border-radius:50%;">` : ''}
               ${isSigned ? `🟢 <strong>${this.escapeHtml(this.candidate.name || this.candidate.email)}</strong> ${this.candidate.email && this.candidate.name ? `<span style="font-size:12px;opacity:0.85;">(${this.escapeHtml(this.candidate.email)})</span>` : ''}` : '⚪ არ ხართ შესული'}
             </span>
-            ${!isSigned ? `<button class="btn btn-subtle" id="btnChangeCand" style="display:inline-flex;align-items:center;gap:8px;background:#fff;border:1.5px solid #2563eb;padding:6px 14px;border-radius:8px;font-weight:700;color:#1e293b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+            ${!isSigned ? `<button class="btn btn-subtle" id="btnChangeCand" style="display:inline-flex;align-items:center;gap:6px;background:#f6f8fa;border:1px solid #d0d7de;padding:5px 12px;border-radius:6px;font-weight:600;font-size:13px;color:#24292f;cursor:pointer;box-shadow:0 1px 0 rgba(27,31,36,0.04);">
               <span>🔐</span>
               <span>შესვლა / რეგისტრაცია</span>
             </button>` : ''}
-            ${isSigned ? `<button class="btn btn-subtle" id="btnSignOutCand" style="padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;color:#dc2626;border:1px solid #fecaca;background:#fef2f2;cursor:pointer;">🚪 გასვლა</button>` : ''}
+            ${isSigned ? `<button class="btn btn-subtle" id="btnSignOutCand" style="padding:5px 12px;border-radius:6px;font-size:12.5px;font-weight:600;color:#cf222e;border:1px solid #d0d7de;background:#f6f8fa;cursor:pointer;">🚪 გასვლა</button>` : ''}
           </div>
 
           <!-- სირთულის 3-პოზიციიანი გადამრთველი (მარტივი, საშუალო, რთული) ადმინ პანელის ზოლზე -->
@@ -945,7 +945,7 @@ class ExamUI {
         </div>
 
         ${showSignedBanner ? `
-          <div style="background:#ecfdf5;border:1.5px solid #10b981;color:#065f46;padding:12px 18px;border-radius:10px;margin-bottom:16px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;">
+          <div style="background:#dafbe1;border:1px solid #4ac26b;color:#1a7f37;padding:12px 18px;border-radius:6px;margin-bottom:16px;font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:10px;">
             <span>✅</span>
             <span>ავტორიზაცია წარმატებულია: <strong>${this.escapeHtml(this.candidate.name)}</strong> (${this.escapeHtml(this.candidate.email)})</span>
           </div>
@@ -955,7 +955,6 @@ class ExamUI {
           <h1>არქიტექტორების, ინჟინერ-მშენებლებისა და ექსპერტების სერტიფიცირების საგამოცდო სისტემა</h1>
           <p class="subtitle">საქართველოს მთავრობის №134 დადგენილების, №41, №732, №255, №261 დადგენილებებისა და სამშენებლო კოდექსის (№3213-რს) საგამოცდო სიმულატორი</p>
           <div class="mandatory-date-badge">
-            <span class="pulse-dot"></span>
             სავალდებულო სერტიფიცირების ამოქმედების თარიღი: <strong>2026 წლის 20 დეკემბერი</strong>
           </div>
         </header>
@@ -971,8 +970,8 @@ class ExamUI {
                 <div class="card-field-tag ${p.field}">${p.field === 'architecture' ? 'არქიტექტურა' : 'კონსტრუქცია'}</div>
                 <h3 class="profile-name">${p.title}</h3>
                 <div class="profile-criteria">
-                  <div class="crit-row" style="background:${currentDiff === 'hard' ? '#fef2f2' : (currentDiff === 'medium' ? '#fffbeb' : '#ecfdf5')};padding:6px 10px;border-radius:6px;border:1px solid ${currentDiff === 'hard' ? '#fca5a5' : (currentDiff === 'medium' ? '#fde68a' : '#a7f3d0')};">
-                    <span class="crit-label" style="font-weight:700;color:${currentDiff === 'hard' ? '#991b1b' : (currentDiff === 'medium' ? '#92400e' : '#065f46')};">სირთულის დონე:</span>
+                  <div class="crit-row">
+                    <span class="crit-label">სირთულის დონე:</span>
                     <span class="crit-val">${diffMeta.badgeHtml}</span>
                   </div>
                   <div class="crit-row">
