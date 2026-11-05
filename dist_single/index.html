@@ -7936,6 +7936,25 @@ window.EngineeringCalculator = EngineeringCalculator;
  * - Google Sheets / Cloud Webhook ავტომატური სინქრონიზაცია
  */
 
+// =====================================================================
+// ავტორიზაციის კონფიგურაცია (ელ-ფოსტა + პაროლი)
+//
+// სანამ FIREBASE_CONFIG = null, ანგარიშები ინახება მხოლოდ ამ ბრაუზერში
+// (პაროლი არ ინახება — მხოლოდ PBKDF2-SHA256 ჰეში მარილით).
+//
+// ნებისმიერი მოწყობილობიდან შესასვლელად ჩასვით Firebase პროექტის კონფიგი:
+//   const FIREBASE_CONFIG = {
+//     apiKey: "AIza...",
+//     authDomain: "your-project.firebaseapp.com",
+//     projectId: "your-project"
+//   };
+// (Firebase Console → Authentication → Sign-in method → Email/Password: Enable;
+//  Authentication → Settings → Authorized domains: დაამატეთ kobaliaint-design.github.io)
+// =====================================================================
+const FIREBASE_CONFIG = null;
+const FIREBASE_SDK_VERSION = '10.12.2';
+const AUTH_MIN_PASSWORD = 6;
+
 class ExamUI {
   constructor(engine, calculator) {
     this.engine = engine;
@@ -7954,6 +7973,11 @@ class ExamUI {
       localStorage.removeItem('exam_registered_users');
     } catch(e) {}
     this.candidate = this.loadCandidate();
+    // ძველი (პაროლის გარეშე) სესიების გაუქმება — შესვლა მხოლოდ ელ-ფოსტით და პაროლით
+    if (this.candidate && this.candidate.authVersion !== 2) {
+      this.clearCandidateSession();
+    }
+    this.initAuth();
     this.syncFromCloud().then(() => {
       this.initGoogleIdentity();
     }).catch(() => {});
@@ -8125,10 +8149,11 @@ class ExamUI {
   saveCandidate(name, emailOrId, phone = '', picture = '') {
     this.candidate = {
       name: (name || '').trim(),
-      email: (emailOrId || '').trim(),
+      email: (emailOrId || '').trim().toLowerCase(),
       phone: (phone || '').trim(),
       picture: picture || '',
       signedIn: true,
+      authVersion: 2,
       lastLogin: Date.now()
     };
     const candJson = JSON.stringify(this.candidate);
@@ -8140,7 +8165,7 @@ class ExamUI {
     this.setCookie('exam_current_user', candJson, 365);
   }
 
-  signOutCandidate() {
+  clearCandidateSession() {
     this.candidate = null;
     try {
       localStorage.removeItem('exam_current_user');
@@ -8148,7 +8173,176 @@ class ExamUI {
       localStorage.removeItem('exam_last_candidate');
     } catch(e) {}
     this.setCookie('exam_current_user', '', -1);
+  }
+
+  async signOutCandidate() {
+    this.clearCandidateSession();
+    if (this.isFirebaseMode()) {
+      try {
+        const auth = await this.getFirebaseAuth();
+        await auth.signOut();
+      } catch (e) {}
+    }
     this.renderHome();
+  }
+
+  // ===================== ავტორიზაცია: ელ-ფოსტა + პაროლი =====================
+
+  isFirebaseMode() {
+    return Boolean(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey);
+  }
+
+  nameFromEmail(email) {
+    return String(email || '').split('@')[0] || 'კანდიდატი';
+  }
+
+  loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('ვერ ჩაიტვირთა: ' + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  getFirebaseAuth() {
+    if (!this.isFirebaseMode()) return Promise.resolve(null);
+    if (!this._fbAuthPromise) {
+      this._fbAuthPromise = (async () => {
+        const base = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}`;
+        if (typeof firebase === 'undefined') await this.loadScript(`${base}/firebase-app-compat.js`);
+        if (!firebase.auth) await this.loadScript(`${base}/firebase-auth-compat.js`);
+        if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+        const auth = firebase.auth();
+        await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        return auth;
+      })();
+      this._fbAuthPromise.catch(() => { this._fbAuthPromise = null; });
+    }
+    return this._fbAuthPromise;
+  }
+
+  async initAuth() {
+    if (!this.isFirebaseMode()) return;
+    try {
+      const auth = await this.getFirebaseAuth();
+      auth.onAuthStateChanged((user) => {
+        const onHome = Boolean(document.querySelector('.home-container'));
+        if (user && user.email) {
+          if (!this.candidate || this.candidate.email !== user.email.toLowerCase()) {
+            this.saveCandidate(this.nameFromEmail(user.email), user.email);
+            if (onHome) this.renderHome();
+          }
+        } else if (this.candidate) {
+          this.clearCandidateSession();
+          if (onHome) this.renderHome();
+        }
+      });
+    } catch (e) {
+      console.warn('Firebase init notice:', e);
+    }
+  }
+
+  // --- ლოკალური ანგარიშები (PBKDF2 ჰეში, პაროლი არსად ინახება) ---
+
+  getLocalAccounts() {
+    try {
+      return JSON.parse(localStorage.getItem('exam_accounts_v2') || '{}') || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  saveLocalAccounts(accounts) {
+    localStorage.setItem('exam_accounts_v2', JSON.stringify(accounts || {}));
+  }
+
+  bufToHex(buf) {
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  hexToBytes(hex) {
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return out;
+  }
+
+  async hashPassword(password, saltHex, iterations) {
+    if (!window.crypto || !crypto.subtle) throw { code: 'no-crypto' };
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', hash: 'SHA-256', salt: this.hexToBytes(saltHex), iterations },
+      key,
+      256
+    );
+    return this.bufToHex(bits);
+  }
+
+  safeEqual(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+    let r = 0;
+    for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return r === 0;
+  }
+
+  // აბრუნებს 'ok' (შევიდა) ან 'not-found' (ანგარიში არ არსებობს); არასწორ პაროლზე აგდებს შეცდომას
+  async authTryLogin(email, password) {
+    if (this.isFirebaseMode()) {
+      const auth = await this.getFirebaseAuth();
+      try {
+        await auth.signInWithEmailAndPassword(email, password);
+        return 'ok';
+      } catch (e) {
+        if (e.code === 'auth/wrong-password') throw { code: 'wrong-password' };
+        if (['auth/user-not-found', 'auth/invalid-credential', 'auth/invalid-login-credentials'].includes(e.code)) {
+          return 'not-found';
+        }
+        throw e;
+      }
+    }
+
+    const acc = this.getLocalAccounts()[email];
+    if (!acc) return 'not-found';
+    const hash = await this.hashPassword(password, acc.salt, acc.iter);
+    if (!this.safeEqual(hash, acc.hash)) throw { code: 'wrong-password' };
+    return 'ok';
+  }
+
+  async authRegister(email, password) {
+    if (this.isFirebaseMode()) {
+      const auth = await this.getFirebaseAuth();
+      try {
+        await auth.createUserWithEmailAndPassword(email, password);
+        return;
+      } catch (e) {
+        if (e.code === 'auth/email-already-in-use') throw { code: 'exists' };
+        throw e;
+      }
+    }
+
+    const accounts = this.getLocalAccounts();
+    if (accounts[email]) throw { code: 'exists' };
+    const salt = this.bufToHex(crypto.getRandomValues(new Uint8Array(16)));
+    const iter = 150000;
+    accounts[email] = { salt, iter, hash: await this.hashPassword(password, salt, iter), createdAt: Date.now() };
+    this.saveLocalAccounts(accounts);
+  }
+
+  authErrorText(e) {
+    const code = (e && e.code) || '';
+    const map = {
+      'wrong-password': 'პაროლი არასწორია.',
+      'exists': 'ამ ელ-ფოსტით ანგარიში უკვე არსებობს — შეამოწმეთ პაროლი.',
+      'no-crypto': 'ბრაუზერი არ უჭერს მხარს უსაფრთხო შიფრაციას. გამოიყენეთ Chrome / Edge / Firefox.',
+      'locked': 'ძალიან ბევრი წარუმატებელი მცდელობა. სცადეთ 1 წუთში.',
+      'auth/too-many-requests': 'ძალიან ბევრი მცდელობა. სცადეთ რამდენიმე წუთში.',
+      'auth/network-request-failed': 'ინტერნეტთან კავშირი ვერ დამყარდა.',
+      'auth/invalid-email': 'ელ-ფოსტის ფორმატი არასწორია.',
+      'auth/weak-password': `პაროლი უნდა შედგებოდეს მინიმუმ ${AUTH_MIN_PASSWORD} სიმბოლოსგან.`,
+      'auth/operation-not-allowed': 'Firebase-ში ჩართული არ არის Email/Password შესვლა.'
+    };
+    return map[code] || 'შესვლა ვერ მოხერხდა. სცადეთ თავიდან.';
   }
 
   getAdminPin() {
@@ -8175,70 +8369,60 @@ class ExamUI {
     if (existing) existing.remove();
 
     this.pendingAfterAuth = onSuccess || null;
-    const current = this.candidate || {};
+    const fbMode = this.isFirebaseMode();
 
     const overlay = document.createElement('div');
     overlay.id = 'genericModalOverlay';
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
-      <div class="modal-card" style="max-width:440px;">
+      <div class="modal-card" style="max-width:420px;">
         <div class="modal-header" style="border-bottom:1px solid #e2e8f0;padding-bottom:12px;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:24px;">👤</span>
-            <div>
-              <h3 style="margin:0;font-size:18px;color:#0f172a;font-weight:700;">კანდიდატის იდენტიფიკაცია</h3>
-              <p style="margin:2px 0 0;font-size:12px;color:#64748b;">საგამოცდო ტესტირების პროფილი</p>
-            </div>
+            <span style="font-size:24px;">🔐</span>
+            <h3 id="authTitle" style="margin:0;font-size:18px;color:#0f172a;font-weight:700;">შესვლა</h3>
           </div>
           <button class="modal-close-btn" id="modalCloseBtn">&times;</button>
         </div>
 
         <div class="modal-body" style="padding:20px 22px;">
-          <p style="font-size:13px;color:#475569;margin-bottom:16px;line-height:1.45;">
-            საგამოცდო ტესტის დასაწყებად და ოფიციალურ საგამოცდო უწყისში შედეგების დასაფიქსირებლად, გთხოვთ მიუთითოთ თქვენი მონაცემები:
-          </p>
-
-          <form id="candidateLoginForm" onsubmit="return false;">
+          <form id="authForm" autocomplete="on" novalidate>
             <div class="form-group" style="margin-bottom:14px;text-align:left;">
-              <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                სახელი და გვარი <span style="color:#dc2626;">*</span>:
-              </label>
-              <input type="text" id="candFullNameInput" class="form-input" 
-                     placeholder="მაგ: გიორგი ბერიძე" 
-                     value="${this.escapeHtml(current.name || '')}" 
+              <label class="form-label" for="authEmail" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">ელ-ფოსტა</label>
+              <input type="email" id="authEmail" name="email" class="form-input" autocomplete="username"
+                     placeholder="name@gmail.com"
                      style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required autofocus>
             </div>
 
             <div class="form-group" style="margin-bottom:14px;text-align:left;">
-              <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                პირადი ნომერი (11-ნიშნა) ან ელ-ფოსტა <span style="color:#dc2626;">*</span>:
-              </label>
-              <input type="text" id="candEmailOrIdInput" class="form-input" 
-                     placeholder="მაგ: 01024012345 ან g.beridze@gmail.com" 
-                     value="${this.escapeHtml(current.email || '')}" 
+              <label class="form-label" for="authPassword" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">პაროლი</label>
+              <input type="password" id="authPassword" name="password" class="form-input" autocomplete="current-password"
+                     placeholder="მინიმუმ ${AUTH_MIN_PASSWORD} სიმბოლო"
                      style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
             </div>
 
-            <div class="form-group" style="margin-bottom:16px;text-align:left;">
-              <label class="form-label" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px;">
-                ტელეფონის ნომერი (სურვილისამებრ):
-              </label>
-              <input type="tel" id="candPhoneInput" class="form-input" 
-                     placeholder="მაგ: 599 12 34 56" 
-                     value="${this.escapeHtml(current.phone || '')}" 
+            <div id="authConfirmWrap" style="display:none;margin-bottom:14px;text-align:left;">
+              <div id="authNewInfo" style="font-size:13px;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:9px 12px;border-radius:6px;margin-bottom:10px;line-height:1.45;"></div>
+              <label class="form-label" for="authPassword2" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">გაიმეორეთ პაროლი</label>
+              <input type="password" id="authPassword2" class="form-input" autocomplete="new-password"
                      style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;">
             </div>
 
-            <div id="candAuthErrorMsg" style="color:#dc2626;font-size:13px;display:none;margin-bottom:14px;font-weight:600;background:#fef2f2;padding:9px 12px;border-radius:6px;border:1px solid #fecaca;"></div>
+            <div id="authError" style="color:#dc2626;font-size:13px;display:none;margin-bottom:14px;font-weight:600;background:#fef2f2;padding:9px 12px;border-radius:6px;border:1px solid #fecaca;"></div>
+            <div id="authInfo" style="color:#065f46;font-size:13px;display:none;margin-bottom:14px;font-weight:600;background:#ecfdf5;padding:9px 12px;border-radius:6px;border:1px solid #6ee7b7;"></div>
 
-            <button type="submit" id="btnSubmitCandidate" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;font-weight:700;border-radius:8px;cursor:pointer;background:#2563eb;color:#fff;border:none;box-shadow:0 2px 4px rgba(37,99,235,0.25);">
-              🚀 დადასტურება და ტესტირების დაწყება
+            <button type="submit" id="authSubmit" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;font-weight:700;border-radius:8px;cursor:pointer;">
+              შესვლა
             </button>
-          </form>
-        </div>
 
-        <div class="modal-footer" style="justify-content:flex-end;padding:10px 20px;border-top:1px solid #f1f5f9;">
-          <button class="btn btn-secondary" id="modalCancelBtn" style="font-size:13px;padding:6px 14px;">დახურვა</button>
+            <p style="font-size:12px;color:#64748b;margin:12px 0 0;text-align:center;line-height:1.45;">
+              პირველად შემოდიხართ? შეიყვანეთ ელ-ფოსტა და მოიფიქრეთ პაროლი — ანგარიში შეიქმნება.
+            </p>
+            ${fbMode ? `
+              <div style="text-align:center;margin-top:8px;">
+                <button type="button" id="authForgot" style="background:none;border:none;color:#2563eb;font-size:12.5px;cursor:pointer;text-decoration:underline;">დაგავიწყდათ პაროლი?</button>
+              </div>
+            ` : ''}
+          </form>
         </div>
       </div>
     `;
@@ -8247,32 +8431,50 @@ class ExamUI {
 
     const close = () => overlay.remove();
     document.getElementById('modalCloseBtn').onclick = close;
-    document.getElementById('modalCancelBtn').onclick = close;
 
-    const form = document.getElementById('candidateLoginForm');
-    form.onsubmit = (e) => {
-      e.preventDefault();
-      const name = (document.getElementById('candFullNameInput').value || '').trim();
-      const emailOrId = (document.getElementById('candEmailOrIdInput').value || '').trim();
-      const phone = (document.getElementById('candPhoneInput').value || '').trim();
-      const errBox = document.getElementById('candAuthErrorMsg');
+    const $ = (id) => document.getElementById(id);
+    const emailEl = $('authEmail');
+    const passEl = $('authPassword');
+    const pass2El = $('authPassword2');
+    const confirmWrap = $('authConfirmWrap');
+    const submitBtn = $('authSubmit');
+    const errBox = $('authError');
+    const infoBox = $('authInfo');
 
-      if (!name || name.length < 2) {
-        errBox.innerText = 'გთხოვთ შეიყვანოთ სწორი სახელი და გვარი (მინიმუმ 2 სიმბოლო)!';
-        errBox.style.display = 'block';
-        return;
+    let registerMode = false;
+    let registerEmail = '';
+
+    const showError = (msg) => {
+      infoBox.style.display = 'none';
+      errBox.innerText = msg;
+      errBox.style.display = msg ? 'block' : 'none';
+    };
+
+    const setRegisterMode = (on, email) => {
+      registerMode = on;
+      registerEmail = on ? email : '';
+      confirmWrap.style.display = on ? 'block' : 'none';
+      $('authTitle').innerText = on ? 'ახალი ანგარიში' : 'შესვლა';
+      submitBtn.innerText = on ? 'რეგისტრაცია და შესვლა' : 'შესვლა';
+      passEl.autocomplete = on ? 'new-password' : 'current-password';
+      if (on) {
+        $('authNewInfo').innerHTML = fbMode
+          ? `ელ-ფოსტით <strong>${this.escapeHtml(email)}</strong> შესვლა ვერ მოხერხდა.<br>თუ ახალი ხართ — გაიმეორეთ პაროლი და დარეგისტრირდით. თუ ანგარიში უკვე გაქვთ — პაროლი არასწორია.`
+          : `ელ-ფოსტით <strong>${this.escapeHtml(email)}</strong> ანგარიში ჯერ არ არსებობს.<br>გაიმეორეთ პაროლი რეგისტრაციისთვის.`;
+        pass2El.value = '';
+        pass2El.focus();
       }
+    };
 
-      if (!emailOrId || emailOrId.length < 3) {
-        errBox.innerText = 'გთხოვთ შეიყვანოთ პირადი ნომერი ან ელ-ფოსტის მისამართი!';
-        errBox.style.display = 'block';
-        return;
-      }
+    // ელ-ფოსტის შეცვლისას რეგისტრაციის რეჟიმი უქმდება
+    emailEl.addEventListener('input', () => {
+      if (registerMode) setRegisterMode(false);
+      showError('');
+    });
 
-      this.saveCandidate(name, emailOrId, phone);
+    const finish = () => {
       this.justSignedIn = true;
       close();
-
       if (this.pendingAfterAuth) {
         const fn = this.pendingAfterAuth;
         this.pendingAfterAuth = null;
@@ -8281,6 +8483,98 @@ class ExamUI {
         this.renderHome();
       }
     };
+
+    // უხეში ძალის (brute force) შეზღუდვა: 5 წარუმატებელი ცდის შემდეგ 1 წუთით ბლოკი
+    const isLocked = () => (this._authLockUntil || 0) > Date.now();
+    const registerFailure = () => {
+      this._authFails = (this._authFails || 0) + 1;
+      if (this._authFails >= 5) {
+        this._authFails = 0;
+        this._authLockUntil = Date.now() + 60 * 1000;
+      }
+    };
+
+    $('authForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const email = (emailEl.value || '').trim().toLowerCase();
+      const password = passEl.value || '';
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+        showError('შეიყვანეთ სწორი ელ-ფოსტა.');
+        emailEl.focus();
+        return;
+      }
+      if (password.length < AUTH_MIN_PASSWORD) {
+        showError(`პაროლი უნდა შედგებოდეს მინიმუმ ${AUTH_MIN_PASSWORD} სიმბოლოსგან.`);
+        passEl.focus();
+        return;
+      }
+      if (isLocked()) {
+        showError(this.authErrorText({ code: 'locked' }));
+        return;
+      }
+
+      submitBtn.disabled = true;
+      const oldLabel = submitBtn.innerText;
+      submitBtn.innerText = 'მოწმდება...';
+      showError('');
+
+      try {
+        if (registerMode && registerEmail === email) {
+          if (pass2El.value !== password) {
+            showError('პაროლები არ ემთხვევა.');
+            pass2El.focus();
+            return;
+          }
+          await this.authRegister(email, password);
+          this._authFails = 0;
+          this.saveCandidate(this.nameFromEmail(email), email);
+          finish();
+          return;
+        }
+
+        const result = await this.authTryLogin(email, password);
+        if (result === 'ok') {
+          this._authFails = 0;
+          this.saveCandidate(this.nameFromEmail(email), email);
+          finish();
+          return;
+        }
+        if (fbMode) registerFailure();
+        setRegisterMode(true, email);
+      } catch (err) {
+        if (err && (err.code === 'wrong-password' || err.code === 'exists')) registerFailure();
+        showError(this.authErrorText(err));
+        if (err && err.code === 'wrong-password') {
+          passEl.value = '';
+          passEl.focus();
+        }
+      } finally {
+        submitBtn.disabled = false;
+        if (submitBtn.innerText === 'მოწმდება...') submitBtn.innerText = oldLabel;
+      }
+    };
+
+    const forgotBtn = $('authForgot');
+    if (forgotBtn) {
+      forgotBtn.onclick = async () => {
+        const email = (emailEl.value || '').trim().toLowerCase();
+        if (!email) {
+          showError('ჯერ შეიყვანეთ ელ-ფოსტა.');
+          emailEl.focus();
+          return;
+        }
+        try {
+          const auth = await this.getFirebaseAuth();
+          await auth.sendPasswordResetEmail(email);
+        } catch (err) {
+          // ანგარიშის არსებობას არ ვამხელთ
+        }
+        errBox.style.display = 'none';
+        infoBox.innerText = 'თუ ეს ელ-ფოსტა რეგისტრირებულია, პაროლის აღდგენის ბმული გამოგეგზავნებათ.';
+        infoBox.style.display = 'block';
+      };
+    }
   }
 
   promptAdminLogin() {
@@ -8366,12 +8660,12 @@ class ExamUI {
           <div class="candidate-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="cand-name" id="homeCandDisplay" style="display:inline-flex;align-items:center;gap:8px;background:${isSigned ? '#ecfdf5' : '#f8fafc'};border:1px solid ${isSigned ? '#6ee7b7' : '#cbd5e1'};padding:6px 12px;border-radius:8px;font-weight:600;font-size:13.5px;color:${isSigned ? '#065f46' : '#475569'};">
               ${isSigned && this.candidate.picture ? `<img src="${this.escapeHtml(this.candidate.picture)}" alt="" style="width:22px;height:22px;border-radius:50%;">` : ''}
-              ${isSigned ? `🟢 კანდიდატი: <strong>${this.escapeHtml(this.candidate.name)}</strong> ${this.candidate.email ? `(${this.escapeHtml(this.candidate.email)})` : ''}` : '⚪ არ ხართ ავტორიზებული'}
+              ${isSigned ? `🟢 <strong>${this.escapeHtml(this.candidate.email || this.candidate.name)}</strong>` : '⚪ არ ხართ შესული'}
             </span>
-            <button class="btn btn-subtle" id="btnChangeCand" style="display:inline-flex;align-items:center;gap:8px;background:#fff;border:1.5px solid #2563eb;padding:6px 14px;border-radius:8px;font-weight:700;color:#1e293b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
-              <span>👤</span>
-              <span>${isSigned ? 'მონაცემების შეცვლა' : 'კანდიდატის იდენტიფიკაცია'}</span>
-            </button>
+            ${!isSigned ? `<button class="btn btn-subtle" id="btnChangeCand" style="display:inline-flex;align-items:center;gap:8px;background:#fff;border:1.5px solid #2563eb;padding:6px 14px;border-radius:8px;font-weight:700;color:#1e293b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+              <span>🔐</span>
+              <span>შესვლა / რეგისტრაცია</span>
+            </button>` : ''}
             ${isSigned ? `<button class="btn btn-subtle" id="btnSignOutCand" style="padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;color:#dc2626;border:1px solid #fecaca;background:#fef2f2;cursor:pointer;">🚪 გასვლა</button>` : ''}
           </div>
           <div class="admin-bar">
@@ -8457,9 +8751,10 @@ class ExamUI {
     `;
 
     // ივენთები
-    document.getElementById('btnChangeCand').onclick = () => {
-      this.promptCandidateModal(() => this.renderHome());
-    };
+    const changeCandBtn = document.getElementById('btnChangeCand');
+    if (changeCandBtn) {
+      changeCandBtn.onclick = () => this.promptCandidateModal(() => this.renderHome());
+    }
 
     const signOutBtn = document.getElementById('btnSignOutCand');
     if (signOutBtn) {
