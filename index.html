@@ -590,28 +590,112 @@ body {
 /* Study mode explanation box */
 .study-explanation-box {
   margin-top: 24px;
-  padding: 16px;
-  background: #f0fdf4;
-  border-left: 4px solid var(--success-color);
-  border-radius: 6px;
+  padding: 18px 20px;
+  background: #f8fafc;
+  border: 1.5px solid #cbd5e1;
+  border-left: 5px solid #2563eb;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
-.study-title {
+.study-explanation-box.correct-box {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  border-left-color: #10b981;
+}
+
+.study-explanation-box.wrong-box {
+  background: #fffbfb;
+  border-color: #fed7aa;
+  border-left-color: #ef4444;
+}
+
+.study-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  font-size: 14px;
   font-weight: 700;
-  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.study-status-banner.status-correct {
+  background: #dcfce7;
   color: #166534;
+  border: 1px solid #86efac;
+}
+
+.study-status-banner.status-wrong {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.study-section {
+  margin-bottom: 14px;
+}
+
+.study-section-title {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: #1e293b;
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .study-text {
   font-size: 14px;
-  color: #14532d;
-  margin-bottom: 8px;
+  line-height: 1.6;
+  color: #334155;
+  background: #ffffff;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
 }
 
-.study-ref {
-  font-size: 12px;
-  color: #166534;
+.study-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.study-meta-item {
+  background: #ffffff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+
+.study-meta-item .meta-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.study-meta-item .meta-val {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.study-pro-tip {
+  display: flex;
+  gap: 10px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 /* Question Navigation bottom */
@@ -8149,6 +8233,102 @@ class ExamUI {
     this.renderHome();
   }
 
+  // ===================== სასწავლო სესიის შენახვა / გაგრძელება =====================
+
+  saveStudyProgress() {
+    const exam = this.engine.currentExam;
+    if (!exam || exam.mode !== 'study' || exam.isFinished) return;
+    try {
+      const payload = {
+        profileId: exam.profileId,
+        currentIndex: exam.currentIndex,
+        userAnswers: exam.userAnswers || {},
+        flagged: Array.from(exam.flagged || []),
+        questions: exam.questions,
+        savedAt: Date.now()
+      };
+      localStorage.setItem(`exam_study_${exam.profileId}`, JSON.stringify(payload));
+    } catch (e) {
+      console.warn('Study auto-save error:', e);
+    }
+  }
+
+  getSavedStudyProgress(profileId) {
+    try {
+      const raw = localStorage.getItem(`exam_study_${profileId}`);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+        return data;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  clearSavedStudyProgress(profileId) {
+    try {
+      localStorage.removeItem(`exam_study_${profileId}`);
+    } catch(e) {}
+  }
+
+  resumeStudy(profileId) {
+    const saved = this.getSavedStudyProgress(profileId);
+    if (!saved) {
+      this.startTest(profileId, 'study');
+      return;
+    }
+
+    const profile = this.engine.structure.profiles[profileId];
+    const syllabi = this.engine.structure.syllabi || this.engine.structure.curricula;
+    const curriculum = syllabi[profile.field];
+
+    this.engine.currentExam = {
+      profileId,
+      profile,
+      mode: 'study',
+      curriculum,
+      questions: saved.questions,
+      userAnswers: saved.userAnswers || {},
+      flagged: new Set(saved.flagged || []),
+      currentIndex: saved.currentIndex || 0,
+      startTime: saved.savedAt || Date.now(),
+      durationMinutes: 0,
+      remainingSeconds: 0,
+      isFinished: false,
+      result: null
+    };
+
+    this.renderExamInterface();
+  }
+
+  formatExtendedExplanation(q, userAnswers = []) {
+    let base = (q.explanation || '').trim();
+    if (!base) {
+      base = 'აღნიშნული მოთხოვნა განისაზღვრება საქართველოს მოქმედი საგამოცდო პროგრამითა და სამშენებლო ნორმებით.';
+    }
+
+    const ref = (q.reference || '').toLowerCase();
+    const ch = (q.chapterName || '').toLowerCase();
+    const sub = (q.subchapterName || '').toLowerCase();
+    let normContext = '';
+
+    if (ref.includes('134') || ch.includes('134') || sub.includes('134')) {
+      normContext = '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#1e3a8a;font-size:13.5px;line-height:1.5;"><strong>📌 საგამოცდო რეგლამენტის მოთხოვნა (№134 დადგენილება):</strong> საგამოცდო წესის თანახმად, ქვეთავობრივი ჩაჭრის წესი მოითხოვს მინიმუმ 70%-იან (ან ექსპერტებისთვის 75%-იან) ზღვარს თითოეულ ქვეთავში ცალ-ცალკე. ამ თემის საფუძვლიანი ცოდნა გადამწყვეტია გამოცდის წარმატებით ჩასაბარებლად.</div>';
+    } else if (ref.includes('41') || ch.includes('41') || ref.includes('უსაფრთხოებ')) {
+      normContext = '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#1e3a8a;font-size:13.5px;line-height:1.5;"><strong>📌 უსაფრთხოების ნორმატივი (დადგენილება №41):</strong> შენობა-ნაგებობათა უსაფრთხოების წესები მოითხოვს მკაცრ დაცვას საევაკუაციო გზების, ხანძარსაწინააღმდეგო ზღუდეებისა და ადამიანთა სიცოცხლის უსაფრთხოების პარამეტრების უზრუნველსაყოფად. ნორმიდან გადახვევა დაუშვებელია.</div>';
+    } else if (ref.includes('732') || ch.includes('732') || ref.includes('განაშენიანებ') || ref.includes('გამოყენებ')) {
+      normContext = '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#1e3a8a;font-size:13.5px;line-height:1.5;"><strong>📌 დაგეგმარების რეგლამენტი (დადგენილება №732):</strong> ტერიტორიების გამოყენებისა და განაშენიანების ძირითადი დებულებები წარმოადგენს გენგეგმის, მიჯნის ზონებისა და კოეფიციენტების (კ-1, კ-2, კ-3) განმსაზღვრელ უმთავრეს სამართლებრივ ჩარჩოს.</div>';
+    } else if (ref.includes('255') || ch.includes('ნებართვ') || ch.includes('მშენებლობ')) {
+      normContext = '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#1e3a8a;font-size:13.5px;line-height:1.5;"><strong>📌 სანებართვო წარმოება (დადგენილება №255):</strong> მშენებლობის ნებართვის გაცემისა და ექსპლუატაციაში მიღების ეტაპობრივი პროცედურა მოითხოვს მკაცრ შესაბამისობას თითოეული კლასის ობიექტისათვის დადგენილ ვადებთან და წარსადგენ დოკუმენტაციასთან.</div>';
+    } else if (ref.includes('ევროკოდ') || ref.includes('სეისმ') || ch.includes('კონსტრუქც')) {
+      normContext = '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#1e3a8a;font-size:13.5px;line-height:1.5;"><strong>📌 საინჟინრო და კონსტრუქციული ნორმები:</strong> გაანგარიშებისას აუცილებელია დატვირთვების კომბინაციების, მასალის სიმტკიცისა და სეისმომედეგობის კოეფიციენტების ზუსტი გათვალისწინება მოქმედი ნორმებისა და ევროკოდების მიხედვით.</div>';
+    }
+
+    return `<div><div style="font-size:14.5px;line-height:1.6;color:#1e293b;">${this.escapeHtml(base)}</div>${normContext}</div>`;
+  }
+
   // ===================== ცენტრალური ავტორიზაცია (ჰეშით დაცული) =====================
 
   async hashPassword(password, salt, email) {
@@ -8664,7 +8844,10 @@ class ExamUI {
         <section class="profile-selection-section">
           <h2>აირჩიეთ საგამოცდო პროფილი და რეჟიმი:</h2>
           <div class="profile-cards-grid">
-            ${Object.values(profiles).map(p => `
+            ${Object.values(profiles).map(p => {
+              const savedStudy = this.getSavedStudyProgress(p.id);
+              const answeredCount = savedStudy ? Object.keys(savedStudy.userAnswers || {}).length : 0;
+              return `
               <div class="profile-card" data-id="${p.id}">
                 <div class="card-field-tag ${p.field}">${p.field === 'architecture' ? 'არქიტექტურა' : 'კონსტრუქცია'}</div>
                 <h3 class="profile-name">${p.title}</h3>
@@ -8686,12 +8869,24 @@ class ExamUI {
                   <button class="btn btn-primary start-exam-btn" data-id="${p.id}" data-mode="exam">
                     საგამოცდო რეჟიმი (180 წთ, 100 კითხვა)
                   </button>
-                  <button class="btn btn-secondary start-study-btn" data-id="${p.id}" data-mode="study">
-                    სასწავლო რეჟიმი (განმარტებებით)
-                  </button>
+                  ${savedStudy && answeredCount > 0 ? `
+                    <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
+                      <button class="btn btn-success resume-study-btn" data-id="${p.id}" style="background:#059669;color:#fff;font-weight:700;border:none;padding:10px;border-radius:6px;cursor:pointer;">
+                        ▶️ სწავლის გაგრძელება (${answeredCount}/100 კითხვა)
+                      </button>
+                      <button class="btn btn-subtle restart-study-btn" data-id="${p.id}" style="font-size:12px;color:#64748b;background:transparent;border:none;cursor:pointer;text-decoration:underline;">
+                        🔄 თავიდან დაწყება (ახალი სესია)
+                      </button>
+                    </div>
+                  ` : `
+                    <button class="btn btn-secondary start-study-btn" data-id="${p.id}" data-mode="study">
+                      სასწავლო რეჟიმი (დროის გარეშე, განმარტებებით)
+                    </button>
+                  `}
                 </div>
               </div>
-            `).join('')}
+            `;
+            }).join('')}
           </div>
         </section>
 
@@ -8749,14 +8944,38 @@ class ExamUI {
         this.startTestWithCheck(profileId, mode);
       });
     });
+
+    app.querySelectorAll('.resume-study-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const profileId = e.currentTarget.getAttribute('data-id');
+        this.startTestWithCheck(profileId, 'resume');
+      });
+    });
+
+    app.querySelectorAll('.restart-study-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const profileId = e.currentTarget.getAttribute('data-id');
+        if (confirm("დარწმუნებული ხართ, რომ გსურთ მიმდინარე სასწავლო პროგრესის წაშლა და თავიდან დაწყება?")) {
+          this.clearSavedStudyProgress(profileId);
+          this.startTestWithCheck(profileId, 'study');
+        }
+      });
+    });
   }
 
   startTestWithCheck(profileId, mode) {
     if (!this.candidate || (!this.candidate.name && !this.candidate.email)) {
-      this.promptCandidateModal(() => this.startTest(profileId, mode));
+      this.promptCandidateModal(() => {
+        if (mode === 'resume') this.resumeStudy(profileId);
+        else this.startTest(profileId, mode);
+      });
       return;
     }
-    this.startTest(profileId, mode);
+    if (mode === 'resume') {
+      this.resumeStudy(profileId);
+    } else {
+      this.startTest(profileId, mode);
+    }
   }
 
   startTest(profileId, mode) {
@@ -8780,18 +8999,30 @@ class ExamUI {
           </div>
 
           <div class="header-center">
-            <div class="timer-box" id="timerBox">
-              <span class="timer-icon">⏱️</span>
-              <span id="timerDigits" class="timer-digits">03:00:00</span>
-            </div>
+            ${exam.mode === 'study' ? `
+              <div class="timer-box" style="background:#ecfdf5;border:1.5px solid #10b981;color:#065f46;padding:7px 16px;border-radius:20px;font-size:13.5px;font-weight:700;display:inline-flex;align-items:center;gap:8px;">
+                <span style="font-size:16px;">📖</span>
+                <span>სასწავლო რეჟიმი (დროის ლიმიტის გარეშე)</span>
+              </div>
+            ` : `
+              <div class="timer-box" id="timerBox">
+                <span class="timer-icon">⏱️</span>
+                <span id="timerDigits" class="timer-digits">03:00:00</span>
+              </div>
+            `}
           </div>
 
           <div class="header-right">
+            ${exam.mode === 'study' ? `
+              <button id="pauseStudyBtn" class="btn btn-secondary" style="margin-right:8px;font-weight:700;background:#f8fafc;border:1.5px solid #cbd5e1;color:#1e293b;" title="პროგრესის შენახვა და საიტზე დაბრუნება">
+                💾 შენახვა და გასვლა
+              </button>
+            ` : ''}
             <button id="calcToggleBtn" class="btn btn-icon" title="საინჟინრო კალკულატორი">
               ⚙️ კალკულატორი
             </button>
-            <button id="finishExamBtn" class="btn btn-danger">
-              გამოცდის დასრულება
+            <button id="finishExamBtn" class="btn ${exam.mode === 'study' ? 'btn-success' : 'btn-danger'}" style="${exam.mode === 'study' ? 'background:#059669;border-color:#059669;' : ''}">
+              ${exam.mode === 'study' ? '🏁 შედეგების შეჯამება' : 'გამოცდის დასრულება'}
             </button>
           </div>
         </header>
@@ -8851,6 +9082,16 @@ class ExamUI {
       calcBtn.addEventListener('click', () => this.calculator.toggle());
     }
 
+    // შენახვა და გასვლა (სასწავლო რეჟიმისთვის)
+    const pauseBtn = document.getElementById('pauseStudyBtn');
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', () => {
+        this.saveStudyProgress();
+        alert("💾 თქვენი სასწავლო პროგრესი შენახულია!\n\nშეგიძლიათ მშვიდად განაგრძოთ მუშაობა და დაბრუნდეთ ნებისმიერ დროს (თუნდაც ხვალ) — სისტემა გაგიხსნით ზუსტად იმავე კითხვას.");
+        this.renderHome();
+      });
+    }
+
     // დასრულება
     document.getElementById('finishExamBtn').addEventListener('click', () => {
       this.promptFinishExam();
@@ -8860,6 +9101,7 @@ class ExamUI {
     document.getElementById('prevBtn').addEventListener('click', () => {
       if (exam.currentIndex > 0) {
         exam.currentIndex--;
+        if (exam.mode === 'study') this.saveStudyProgress();
         this.renderCurrentQuestion();
         this.updatePalette();
       }
@@ -8868,6 +9110,7 @@ class ExamUI {
     document.getElementById('nextBtn').addEventListener('click', () => {
       if (exam.currentIndex < exam.questions.length - 1) {
         exam.currentIndex++;
+        if (exam.mode === 'study') this.saveStudyProgress();
         this.renderCurrentQuestion();
         this.updatePalette();
       }
@@ -8876,6 +9119,7 @@ class ExamUI {
     // დროშა
     document.getElementById('flagBtn').addEventListener('click', () => {
       this.engine.toggleFlag(exam.currentIndex);
+      if (exam.mode === 'study') this.saveStudyProgress();
       this.renderCurrentQuestion();
       this.updatePalette();
     });
@@ -8993,13 +9237,46 @@ class ExamUI {
         }).join('')}
       </div>
 
-      ${(exam.mode === 'study' && isAnswered) ? `
-        <div class="study-explanation-box">
-          <div class="study-title">💡 ნორმატიული განმარტება და სამართლებრივი საფუძველი:</div>
-          <div class="study-text">${q.explanation || 'განმარტება მოცემულია შესაბამის სტანდარტში.'}</div>
-          <div class="study-ref"><strong>მითითება:</strong> ${q.reference || 'საქართველოს მოქმედი სამშენებლო ნორმები'}</div>
-        </div>
-      ` : ''}
+      ${(exam.mode === 'study' && isAnswered) ? (() => {
+        const isCorrect = q.correct.length === userAnswers.length && q.correct.every(c => userAnswers.includes(c));
+        const correctLabels = q.correct.map(c => `<strong>${String.fromCharCode(65 + c)}.</strong> ${this.escapeHtml(q.options[c])}`).join('<br>');
+        return `
+          <div class="study-explanation-box ${isCorrect ? 'correct-box' : 'wrong-box'}">
+            <div class="study-status-banner ${isCorrect ? 'status-correct' : 'status-wrong'}">
+              <span style="font-size:18px;">${isCorrect ? '✅' : '❌'}</span>
+              <span>${isCorrect ? 'თქვენი პასუხი სწორია!' : 'თქვენი პასუხი არასწორია!'}</span>
+            </div>
+
+            <div style="margin-bottom:12px;background:#ffffff;padding:10px 14px;border-radius:6px;border:1px solid ${isCorrect ? '#86efac' : '#fca5a5'};">
+              <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:4px;">სწორი პასუხი:</div>
+              <div style="font-size:13.5px;color:#0f172a;line-height:1.45;">${correctLabels}</div>
+            </div>
+
+            <div class="study-section">
+              <div class="study-section-title">📖 ვრცელი ნორმატიული და სამართლებრივი განმარტება:</div>
+              <div class="study-text">${this.formatExtendedExplanation(q, userAnswers)}</div>
+            </div>
+
+            <div class="study-meta-grid">
+              <div class="study-meta-item">
+                <span class="meta-label">📜 სამართლებრივი მითითება / აქტი:</span>
+                <span class="meta-val">${this.escapeHtml(q.reference || 'საქართველოს მოქმედი სამშენებლო ნორმები')}</span>
+              </div>
+              <div class="study-meta-item">
+                <span class="meta-label">📂 საგამოცდო ქვეთავი:</span>
+                <span class="meta-val">${this.escapeHtml(q.subchapterName || q.chapterName || 'დადგენილება №134')}</span>
+              </div>
+            </div>
+
+            <div class="study-pro-tip">
+              <span style="font-size:18px;">💡</span>
+              <div>
+                <strong>საგამოცდო რჩევა:</strong> დააკვირდით კითხვაში მოცემულ საკვანძო ტერმინებსა და რიცხვით პარამეტრებს. გამოცდაზე მსგავსი კითხვები ხშირად ამოწმებს გამონაკლისებსა და კლასების მიხედვით დაწესებულ ზღვრულ მოთხოვნებს.
+              </div>
+            </div>
+          </div>
+        `;
+      })() : ''}
     `;
 
     // ვარიანტის არჩევა
@@ -9007,6 +9284,9 @@ class ExamUI {
       el.addEventListener('click', () => {
         const optIdx = parseInt(el.getAttribute('data-opt'), 10);
         this.engine.selectAnswer(exam.currentIndex, optIdx);
+        if (exam.mode === 'study') {
+          this.saveStudyProgress();
+        }
         this.renderCurrentQuestion();
         this.updatePalette();
       });
@@ -9060,6 +9340,7 @@ class ExamUI {
       btn.addEventListener('click', (e) => {
         const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
         exam.currentIndex = idx;
+        if (exam.mode === 'study') this.saveStudyProgress();
         this.renderCurrentQuestion();
         this.updatePalette();
       });
@@ -9093,12 +9374,18 @@ class ExamUI {
       if (!exam.userAnswers[i] || exam.userAnswers[i].length === 0) unanswered++;
     });
 
-    let msg = "ნამდვილად გსურთ გამოცდის დასრულება და ნაშრომის გადაგზავნა?";
+    let msg = exam.mode === 'study'
+      ? "გსურთ სასწავლო სესიის შეჯამება და შედეგების ნახვა?"
+      : "ნამდვილად გსურთ გამოცდის დასრულება და ნაშრომის გადაგზავნა?";
+
     if (unanswered > 0) {
       msg = `ყურადღება! თქვენ გაქვთ ${unanswered} გაუცემელი პასუხი 100-დან.\n\n` + msg;
     }
 
     if (confirm(msg)) {
+      if (exam.mode === 'study') {
+        this.clearSavedStudyProgress(exam.profileId);
+      }
       this.engine.finishExam();
       this.renderResults();
     }
