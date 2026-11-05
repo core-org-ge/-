@@ -1880,17 +1880,18 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  background: #f8fafc;
-  padding: 4px 10px;
+  background: #ffffff;
+  padding: 5px 12px;
   border-radius: 12px;
-  border: 1px solid #cbd5e1;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  border: 1.5px solid #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
+  margin: 0 auto;
 }
 
 .diff-nav-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #334155;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #1e3a8a;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1899,18 +1900,19 @@ body {
 .diff-segmented-group {
   display: inline-flex;
   align-items: center;
-  background: #e2e8f0;
-  padding: 3px;
-  border-radius: 9px;
-  gap: 2px;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 10px;
+  gap: 4px;
+  border: 1px solid #cbd5e1;
 }
 
 .btn-diff-segment {
   border: none;
   background: transparent;
-  padding: 6px 14px;
-  border-radius: 7px;
-  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
   font-weight: 700;
   color: #64748b;
   cursor: pointer;
