@@ -24,6 +24,10 @@ class ExamUI {
 
   init() {
     this.bindGlobalEvents();
+    // გაჟონილი ძველი ექაუნთების გაწმენდა ლოკალური მეხსიერებიდან
+    try {
+      localStorage.removeItem('exam_registered_users');
+    } catch(e) {}
     this.candidate = this.loadCandidate();
     this.syncFromCloud().then(() => {
       this.initGoogleIdentity();
@@ -176,37 +180,6 @@ class ExamUI {
     return "";
   }
 
-  getStoredUsers() {
-    try {
-      return JSON.parse(localStorage.getItem('exam_registered_users') || '[]');
-    } catch(e) {
-      return [];
-    }
-  }
-
-  saveStoredUsers(users) {
-    try {
-      localStorage.setItem('exam_registered_users', JSON.stringify(users || []));
-    } catch(e) {}
-  }
-
-  syncUsersWithLocal(cloudUsers) {
-    if (!Array.isArray(cloudUsers)) return;
-    const localUsers = this.getStoredUsers();
-    const map = new Map();
-    localUsers.forEach(u => {
-      if (u && u.email) map.set(u.email.toLowerCase(), u);
-    });
-    cloudUsers.forEach(u => {
-      if (u && u.email) {
-        const existing = map.get(u.email.toLowerCase());
-        map.set(u.email.toLowerCase(), { ...(existing || {}), ...u });
-      }
-    });
-    const merged = Array.from(map.values());
-    this.saveStoredUsers(merged);
-  }
-
   loadCandidate() {
     try {
       let raw = localStorage.getItem('exam_current_user') || 
@@ -224,12 +197,11 @@ class ExamUI {
     }
   }
 
-  saveCandidate(name, email, phone = '', pin = '', picture = '') {
+  saveCandidate(name, emailOrId, phone = '', picture = '') {
     this.candidate = {
       name: (name || '').trim(),
-      email: (email || '').trim().toLowerCase(),
+      email: (emailOrId || '').trim(),
       phone: (phone || '').trim(),
-      pin: (pin || '').trim(),
       picture: picture || '',
       signedIn: true,
       lastLogin: Date.now()
@@ -241,60 +213,6 @@ class ExamUI {
       localStorage.setItem('exam_last_candidate', candJson);
     } catch(e) {}
     this.setCookie('exam_current_user', candJson, 365);
-
-    // მომხმარებლის დამატება/განახლება სიაში
-    const users = this.getStoredUsers();
-    const existingIdx = users.findIndex(u => (u.email || '').toLowerCase() === this.candidate.email);
-    if (existingIdx !== -1) {
-      users[existingIdx] = { ...users[existingIdx], ...this.candidate };
-    } else {
-      users.unshift(this.candidate);
-    }
-    this.saveStoredUsers(users);
-
-    // ღრუბელში ატვირთვა
-    this.pushUserToCloud(this.candidate);
-  }
-
-  async pushUserToCloud(user) {
-    // 1. ჩვენს Node სერვერზე რეგისტრაცია
-    try {
-      fetch(`${this.getApiBaseUrl()}/api/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: user.name,
-          email: user.email,
-          phone: user.phone || '',
-          password: user.pin || ''
-        })
-      }).catch(() => {});
-    } catch(err) {}
-
-    // 2. სარეზერვო ღრუბელში
-    try {
-      const getResp = await fetch(this.getCloudApiUrl(), { cache: 'no-store' });
-      if (getResp.ok) {
-        const obj = await getResp.json();
-        const currentData = obj.data || {};
-        let users = Array.isArray(currentData.users) ? currentData.users : [];
-        const idx = users.findIndex(u => (u.email || '').toLowerCase() === (user.email || '').toLowerCase());
-        if (idx !== -1) {
-          users[idx] = { ...users[idx], ...user };
-        } else {
-          users.push(user);
-        }
-        currentData.users = users;
-        await fetch(this.getCloudApiUrl(), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json; charset=utf-8' },
-          body: JSON.stringify({
-            name: 'georgia_exam_journal_v1',
-            data: currentData
-          })
-        });
-      }
-    } catch(e) {}
   }
 
   signOutCandidate() {
@@ -332,105 +250,70 @@ class ExamUI {
     if (existing) existing.remove();
 
     this.pendingAfterAuth = onSuccess || null;
+    const current = this.candidate || {};
 
     const overlay = document.createElement('div');
     overlay.id = 'genericModalOverlay';
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
-      <div class="modal-card" style="max-width:460px;">
+      <div class="modal-card" style="max-width:440px;">
         <div class="modal-header" style="border-bottom:1px solid #e2e8f0;padding-bottom:12px;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:22px;">👤</span>
-            <h3 style="margin:0;font-size:18px;color:#1e293b;">საგამოცდო პროფილი და ავტორიზაცია</h3>
+            <span style="font-size:24px;">👤</span>
+            <div>
+              <h3 style="margin:0;font-size:18px;color:#0f172a;font-weight:700;">კანდიდატის იდენტიფიკაცია</h3>
+              <p style="margin:2px 0 0;font-size:12px;color:#64748b;">საგამოცდო ტესტირების პროფილი</p>
+            </div>
           </div>
           <button class="modal-close-btn" id="modalCloseBtn">&times;</button>
         </div>
 
-        <div style="display:flex;background:#f1f5f9;border-bottom:1px solid #e2e8f0;padding:4px 6px;gap:6px;">
-          <button type="button" id="tabBtnLogin" style="flex:1;padding:9px;font-size:13.5px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:#fff;color:#1e293b;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-            🔑 სისტემაში შესვლა
-          </button>
-          <button type="button" id="tabBtnRegister" style="flex:1;padding:9px;font-size:13.5px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:transparent;color:#64748b;box-shadow:none;">
-            📝 ახალი რეგისტრაცია
-          </button>
+        <div class="modal-body" style="padding:20px 22px;">
+          <p style="font-size:13px;color:#475569;margin-bottom:16px;line-height:1.45;">
+            საგამოცდო ტესტის დასაწყებად და ოფიციალურ საგამოცდო უწყისში შედეგების დასაფიქსირებლად, გთხოვთ მიუთითოთ თქვენი მონაცემები:
+          </p>
+
+          <form id="candidateLoginForm" onsubmit="return false;">
+            <div class="form-group" style="margin-bottom:14px;text-align:left;">
+              <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
+                სახელი და გვარი <span style="color:#dc2626;">*</span>:
+              </label>
+              <input type="text" id="candFullNameInput" class="form-input" 
+                     placeholder="მაგ: გიორგი ბერიძე" 
+                     value="${this.escapeHtml(current.name || '')}" 
+                     style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required autofocus>
+            </div>
+
+            <div class="form-group" style="margin-bottom:14px;text-align:left;">
+              <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
+                პირადი ნომერი (11-ნიშნა) ან ელ-ფოსტა <span style="color:#dc2626;">*</span>:
+              </label>
+              <input type="text" id="candEmailOrIdInput" class="form-input" 
+                     placeholder="მაგ: 01024012345 ან g.beridze@gmail.com" 
+                     value="${this.escapeHtml(current.email || '')}" 
+                     style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
+            </div>
+
+            <div class="form-group" style="margin-bottom:16px;text-align:left;">
+              <label class="form-label" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px;">
+                ტელეფონის ნომერი (სურვილისამებრ):
+              </label>
+              <input type="tel" id="candPhoneInput" class="form-input" 
+                     placeholder="მაგ: 599 12 34 56" 
+                     value="${this.escapeHtml(current.phone || '')}" 
+                     style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;">
+            </div>
+
+            <div id="candAuthErrorMsg" style="color:#dc2626;font-size:13px;display:none;margin-bottom:14px;font-weight:600;background:#fef2f2;padding:9px 12px;border-radius:6px;border:1px solid #fecaca;"></div>
+
+            <button type="submit" id="btnSubmitCandidate" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;font-weight:700;border-radius:8px;cursor:pointer;background:#2563eb;color:#fff;border:none;box-shadow:0 2px 4px rgba(37,99,235,0.25);">
+              🚀 დადასტურება და ტესტირების დაწყება
+            </button>
+          </form>
         </div>
 
-        <div class="modal-body" style="padding:18px 22px;">
-          <!-- ჩანართი 1: შესვლა -->
-          <div id="authPaneLogin" style="display:block;">
-            <p style="font-size:13px;color:#475569;margin-bottom:14px;line-height:1.45;">
-              შეიყვანეთ თქვენი რეგისტრირებული ელ-ფოსტა და პაროლი/PIN:
-            </p>
-            <form id="loginEmailForm" onsubmit="return false;">
-              <div class="form-group" style="margin-bottom:12px;text-align:left;">
-                <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                  თქვენი Gmail / ელ-ფოსტა:
-                </label>
-                <input type="email" id="loginEmailInput" class="form-input" placeholder="მაგ: g.beridze@gmail.com" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required autofocus>
-              </div>
-              <div class="form-group" style="margin-bottom:14px;text-align:left;">
-                <label class="form-label" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px;">
-                  პაროლი ან PIN კოდი:
-                </label>
-                <input type="password" id="loginPinInput" class="form-input" placeholder="••••" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;">
-              </div>
-              <div id="loginErrorMsg" style="color:#dc2626;font-size:13px;display:none;margin-bottom:12px;font-weight:600;background:#fef2f2;padding:8px 12px;border-radius:6px;border:1px solid #fecaca;"></div>
-              <button type="submit" id="btnSubmitLogin" class="btn btn-primary" style="width:100%;padding:11px;font-size:14.5px;font-weight:700;border-radius:8px;cursor:pointer;">
-                🔑 შესვლა და ტესტის დაწყება
-              </button>
-              <div style="text-align:center;margin-top:14px;">
-                <button type="button" id="linkToRegister" style="background:none;border:none;color:#2563eb;font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;">
-                  არ გაქვთ პროფილი? დარეგისტრირდით აქ 📝
-                </button>
-              </div>
-            </form>
-          </div>
-
-          <!-- ჩანართი 2: რეგისტრაცია -->
-          <div id="authPaneRegister" style="display:none;">
-            <p style="font-size:13px;color:#475569;margin-bottom:14px;line-height:1.45;">
-              გაიარეთ <strong>ერთჯერადი რეგისტრაცია</strong>. სისტემა დაგიმახსოვრებთ და შემდგომში ხელახლა შევსება აღარ დაგჭირდებათ:
-            </p>
-            <form id="registerForm" onsubmit="return false;">
-              <div class="form-group" style="margin-bottom:12px;text-align:left;">
-                <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                  სახელი და გვარი <span style="color:#dc2626;">*</span>:
-                </label>
-                <input type="text" id="regNameInput" class="form-input" placeholder="მაგ: გიორგი ბერიძე" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
-              </div>
-              <div class="form-group" style="margin-bottom:12px;text-align:left;">
-                <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                  Gmail / ელ-ფოსტა <span style="color:#dc2626;">*</span>:
-                </label>
-                <input type="email" id="regEmailInput" class="form-input" placeholder="მაგ: g.beridze@gmail.com" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
-              </div>
-              <div class="form-group" style="margin-bottom:12px;text-align:left;">
-                <label class="form-label" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px;">
-                  ტელეფონის ნომერი (არასავალდებულო):
-                </label>
-                <input type="tel" id="regPhoneInput" class="form-input" placeholder="მაგ: 599 12 34 56" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;">
-              </div>
-              <div class="form-group" style="margin-bottom:14px;text-align:left;">
-                <label class="form-label" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px;">
-                  პაროლი / 4-ნიშნა PIN (შემდგომი სწრაფი შესვლისთვის):
-                </label>
-                <input type="password" id="regPinInput" class="form-input" placeholder="მაგ: 1234" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;">
-              </div>
-              <div id="regErrorMsg" style="color:#dc2626;font-size:13px;display:none;margin-bottom:12px;font-weight:600;background:#fef2f2;padding:8px 12px;border-radius:6px;border:1px solid #fecaca;"></div>
-              <button type="submit" id="btnSubmitRegister" class="btn btn-primary" style="width:100%;padding:11px;font-size:14.5px;font-weight:700;border-radius:8px;cursor:pointer;">
-                📝 რეგისტრაცია და დამახსოვრება
-              </button>
-              <div style="text-align:center;margin-top:14px;">
-                <button type="button" id="linkToLogin" style="background:none;border:none;color:#2563eb;font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;">
-                  უკვე გაქვთ პროფილი? შედით სისტემაში 🔑
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-
-        <div class="modal-footer" style="justify-content:flex-end;">
-          <button class="btn btn-secondary" id="modalCancelBtn">დახურვა</button>
+        <div class="modal-footer" style="justify-content:flex-end;padding:10px 20px;border-top:1px solid #f1f5f9;">
+          <button class="btn btn-secondary" id="modalCancelBtn" style="font-size:13px;padding:6px 14px;">დახურვა</button>
         </div>
       </div>
     `;
@@ -441,44 +324,30 @@ class ExamUI {
     document.getElementById('modalCloseBtn').onclick = close;
     document.getElementById('modalCancelBtn').onclick = close;
 
-    // ჩანართების გადართვა
-    const tabLogin = document.getElementById('tabBtnLogin');
-    const tabReg = document.getElementById('tabBtnRegister');
-    const paneLogin = document.getElementById('authPaneLogin');
-    const paneReg = document.getElementById('authPaneRegister');
+    const form = document.getElementById('candidateLoginForm');
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const name = (document.getElementById('candFullNameInput').value || '').trim();
+      const emailOrId = (document.getElementById('candEmailOrIdInput').value || '').trim();
+      const phone = (document.getElementById('candPhoneInput').value || '').trim();
+      const errBox = document.getElementById('candAuthErrorMsg');
 
-    const showLoginTab = () => {
-      tabLogin.style.background = '#fff';
-      tabLogin.style.color = '#1e293b';
-      tabLogin.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
-      tabReg.style.background = 'transparent';
-      tabReg.style.color = '#64748b';
-      tabReg.style.boxShadow = 'none';
-      paneLogin.style.display = 'block';
-      paneReg.style.display = 'none';
-    };
+      if (!name || name.length < 2) {
+        errBox.innerText = 'გთხოვთ შეიყვანოთ სწორი სახელი და გვარი (მინიმუმ 2 სიმბოლო)!';
+        errBox.style.display = 'block';
+        return;
+      }
 
-    const showRegisterTab = () => {
-      tabReg.style.background = '#fff';
-      tabReg.style.color = '#1e293b';
-      tabReg.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
-      tabLogin.style.background = 'transparent';
-      tabLogin.style.color = '#64748b';
-      tabLogin.style.boxShadow = 'none';
-      paneReg.style.display = 'block';
-      paneLogin.style.display = 'none';
-    };
+      if (!emailOrId || emailOrId.length < 3) {
+        errBox.innerText = 'გთხოვთ შეიყვანოთ პირადი ნომერი ან ელ-ფოსტის მისამართი!';
+        errBox.style.display = 'block';
+        return;
+      }
 
-    tabLogin.onclick = showLoginTab;
-    tabReg.onclick = showRegisterTab;
-    const linkReg = document.getElementById('linkToRegister');
-    if (linkReg) linkReg.onclick = showRegisterTab;
-    const linkLog = document.getElementById('linkToLogin');
-    if (linkLog) linkLog.onclick = showLoginTab;
-
-    const completeLogin = () => {
+      this.saveCandidate(name, emailOrId, phone);
       this.justSignedIn = true;
       close();
+
       if (this.pendingAfterAuth) {
         const fn = this.pendingAfterAuth;
         this.pendingAfterAuth = null;
@@ -486,88 +355,6 @@ class ExamUI {
       } else {
         this.renderHome();
       }
-    };
-
-    // ფორმით შესვლა (ელ-ფოსტითა და პინით)
-    const loginForm = document.getElementById('loginEmailForm');
-    loginForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const email = (document.getElementById('loginEmailInput').value || '').trim().toLowerCase();
-      const pin = (document.getElementById('loginPinInput').value || '').trim();
-      const errBox = document.getElementById('loginErrorMsg');
-
-      if (!email || !email.includes('@')) {
-        errBox.innerText = 'გთხოვთ შეიყვანოთ სწორი ელ-ფოსტის მისამართი!';
-        errBox.style.display = 'block';
-        return;
-      }
-
-      // შემოწმება ლოკალურად
-      let user = this.getStoredUsers().find(u => (u.email || '').toLowerCase() === email || (u.username || '').toLowerCase() === email);
-
-      // თუ ლოკალურად ვერ მოიძებნა, ვამოწმებთ სერვერზე
-      if (!user) {
-        errBox.innerText = 'მოწმდება ბაზაში...';
-        errBox.style.display = 'block';
-        try {
-          const resp = await fetch(`${this.getApiBaseUrl()}/api/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ identifier: email, password: pin })
-          });
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data && data.user) {
-              user = data.user;
-            }
-          }
-        } catch (err) {}
-
-        if (!user) {
-          await this.syncFromCloud().catch(() => {});
-          user = this.getStoredUsers().find(u => (u.email || '').toLowerCase() === email || (u.username || '').toLowerCase() === email);
-        }
-      }
-
-      if (user) {
-        if (user.pin && pin && user.pin !== pin) {
-          errBox.innerText = 'არასწორი PIN კოდი ან პაროლი!';
-          errBox.style.display = 'block';
-          return;
-        }
-        this.saveCandidate(user.name, user.email, user.phone || '', user.pin || '');
-        completeLogin();
-      } else {
-        errBox.innerHTML = `მომხმარებელი მეილით <strong>${this.escapeHtml(email)}</strong> ვერ მოიძებნა.<br>გთხოვთ გადახვიდეთ <strong>„რეგისტრაციის“</strong> ჩანართზე.`;
-        errBox.style.display = 'block';
-        // ავტომატურად გადავავსოთ რეგისტრაციის ველში მეილი
-        document.getElementById('regEmailInput').value = email;
-      }
-    };
-
-    // ახალი რეგისტრაციის ფორმა
-    const regForm = document.getElementById('registerForm');
-    regForm.onsubmit = (e) => {
-      e.preventDefault();
-      const name = (document.getElementById('regNameInput').value || '').trim();
-      const email = (document.getElementById('regEmailInput').value || '').trim().toLowerCase();
-      const phone = (document.getElementById('regPhoneInput').value || '').trim();
-      const pin = (document.getElementById('regPinInput').value || '').trim();
-      const errBox = document.getElementById('regErrorMsg');
-
-      if (!name || name.length < 2) {
-        errBox.innerText = 'გთხოვთ შეიყვანოთ სწორი სახელი და გვარი!';
-        errBox.style.display = 'block';
-        return;
-      }
-      if (!email || !email.includes('@')) {
-        errBox.innerText = 'გთხოვთ შეიყვანოთ სწორი Gmail / ელ-ფოსტის მისამართი!';
-        errBox.style.display = 'block';
-        return;
-      }
-
-      this.saveCandidate(name, email, phone, pin);
-      completeLogin();
     };
   }
 
@@ -654,13 +441,13 @@ class ExamUI {
           <div class="candidate-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="cand-name" id="homeCandDisplay" style="display:inline-flex;align-items:center;gap:8px;background:${isSigned ? '#ecfdf5' : '#f8fafc'};border:1px solid ${isSigned ? '#6ee7b7' : '#cbd5e1'};padding:6px 12px;border-radius:8px;font-weight:600;font-size:13.5px;color:${isSigned ? '#065f46' : '#475569'};">
               ${isSigned && this.candidate.picture ? `<img src="${this.escapeHtml(this.candidate.picture)}" alt="" style="width:22px;height:22px;border-radius:50%;">` : ''}
-              ${isSigned ? `🟢 კანდიდატი: ${this.escapeHtml(this.candidate.name)} ${this.candidate.email ? `(${this.escapeHtml(this.candidate.email)})` : ''}` : '⚪ არ ხართ რეგისტრირებული'}
+              ${isSigned ? `🟢 კანდიდატი: <strong>${this.escapeHtml(this.candidate.name)}</strong> ${this.candidate.email ? `(${this.escapeHtml(this.candidate.email)})` : ''}` : '⚪ არ ხართ ავტორიზებული'}
             </span>
             <button class="btn btn-subtle" id="btnChangeCand" style="display:inline-flex;align-items:center;gap:8px;background:#fff;border:1.5px solid #2563eb;padding:6px 14px;border-radius:8px;font-weight:700;color:#1e293b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
               <span>👤</span>
-              <span>${isSigned ? 'მონაცემების შეცვლა' : 'შესვლა / რეგისტრაცია'}</span>
+              <span>${isSigned ? 'მონაცემების შეცვლა' : 'კანდიდატის იდენტიფიკაცია'}</span>
             </button>
-            ${isSigned ? `<button class="btn btn-subtle" id="btnSignOutCand" style="padding:6px 10px;border-radius:8px;font-size:12.5px;color:#dc2626;border:1px solid #fecaca;background:#fef2f2;cursor:pointer;">გასვლა</button>` : ''}
+            ${isSigned ? `<button class="btn btn-subtle" id="btnSignOutCand" style="padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;color:#dc2626;border:1px solid #fecaca;background:#fef2f2;cursor:pointer;">🚪 გასვლა</button>` : ''}
           </div>
           <div class="admin-bar">
             <button class="btn btn-admin" id="btnAdminLogin">🔐 ადმინ პანელი</button>
@@ -1175,9 +962,6 @@ class ExamUI {
         if (obj && obj.data && obj.data.googleClientId) {
           localStorage.setItem('exam_google_client_id', String(obj.data.googleClientId));
         }
-        if (obj && obj.data && Array.isArray(obj.data.users)) {
-          this.syncUsersWithLocal(obj.data.users);
-        }
         const localEntries = JSON.parse(localStorage.getItem('exam_results_journal') || '[]');
         const merged = this.mergeEntries(cloudEntries, localEntries);
         localStorage.setItem('exam_results_journal', JSON.stringify(merged));
@@ -1263,7 +1047,6 @@ class ExamUI {
             entries: combined,
             adminPin: cloudPin,
             googleClientId: cloudGoogleClientId,
-            users: this.getStoredUsers(),
             updatedAt: Date.now()
           }
         })
@@ -1545,8 +1328,25 @@ class ExamUI {
 
     const app = document.getElementById('app');
     const journal = JSON.parse(localStorage.getItem('exam_results_journal') || '[]');
-    const storedUsers = this.getStoredUsers();
     const currentPin = this.getAdminPin();
+
+    // უნიკალური კანდიდატების განსაზღვრა საგამოცდო უწყისიდან
+    const candidateMap = new Map();
+    journal.forEach(j => {
+      const key = (j.candidateEmail || j.candidateName || '').trim().toLowerCase();
+      if (!key) return;
+      if (!candidateMap.has(key)) {
+        candidateMap.set(key, {
+          name: j.candidateName || 'უცნობი',
+          email: j.candidateEmail || '—',
+          phone: j.candidatePhone || '—',
+          count: 0,
+          lastDate: j.date || '—'
+        });
+      }
+      candidateMap.get(key).count += 1;
+    });
+    const uniqueCandidates = Array.from(candidateMap.values());
 
     // თუ პირველად იხსნება პანელი, ფონურად წამოვიღოთ ღრუბლოვანი ბაზიდან ყველა მოწყობილობის შედეგები
     if (!skipCloudSync) {
@@ -1677,9 +1477,9 @@ class ExamUI {
           </table>
         </div>
 
-        <!-- რეგისტრირებული კანდიდატების სია (კონფიდენციალური, მხოლოდ ადმინისთვის) -->
+        <!-- უნიკალური კანდიდატების სია საგამოცდო უწყისიდან -->
         <div class="admin-tools-row" style="margin-top:34px;">
-          <h2 style="font-size:18px;font-weight:700;color:#1e293b;">👥 რეგისტრირებული კანდიდატების ბაზა (${storedUsers.length}):</h2>
+          <h2 style="font-size:18px;font-weight:700;color:#1e293b;">👥 გამოცდაზე გასული კანდიდატები (${uniqueCandidates.length}):</h2>
         </div>
 
         <div class="journal-table-wrap">
@@ -1688,32 +1488,29 @@ class ExamUI {
               <tr>
                 <th>#</th>
                 <th>სახელი და გვარი</th>
-                <th>Gmail მისამართი</th>
+                <th>პირადი ნომერი / Gmail</th>
                 <th>ტელეფონი</th>
-                <th>პაროლი / PIN</th>
-                <th>სტატუსი</th>
+                <th>ტესტების რაოდენობა</th>
+                <th>ბოლო აქტივობა</th>
               </tr>
             </thead>
             <tbody>
-              ${storedUsers.length === 0 ? `
+              ${uniqueCandidates.length === 0 ? `
                 <tr>
                   <td colspan="6" style="text-align:center;padding:26px;color:#64748b;">
-                    რეგისტრირებული კანდიდატები ჯერ არ არიან.
+                    კანდიდატების ჩანაწერები ჯერ არ ფიქსირდება.
                   </td>
                 </tr>
-              ` : storedUsers.map((u, idx) => {
-                const userTestsCount = journal.filter(j => (j.candidateEmail || '').toLowerCase() === (u.email || '').toLowerCase()).length;
-                return `
-                  <tr>
-                    <td><strong>${idx + 1}</strong></td>
-                    <td><strong>${this.escapeHtml(u.name)}</strong></td>
-                    <td><a href="mailto:${this.escapeHtml(u.email)}" style="color:#2563eb;text-decoration:none;">${this.escapeHtml(u.email)}</a></td>
-                    <td>${this.escapeHtml(u.phone || '—')}</td>
-                    <td><code style="background:#f1f5f9;padding:2px 8px;border-radius:4px;color:#1e293b;font-weight:700;">${this.escapeHtml(u.pin || '—')}</code></td>
-                    <td><span class="badge ${userTestsCount > 0 ? 'exam' : 'study'}">${userTestsCount > 0 ? `${userTestsCount} ტესტი` : 'ახალი'}</span></td>
-                  </tr>
-                `;
-              }).join('')}
+              ` : uniqueCandidates.map((u, idx) => `
+                <tr>
+                  <td><strong>${idx + 1}</strong></td>
+                  <td><strong>${this.escapeHtml(u.name)}</strong></td>
+                  <td>${this.escapeHtml(u.email)}</td>
+                  <td>${this.escapeHtml(u.phone || '—')}</td>
+                  <td><span class="badge exam">${u.count} ტესტი</span></td>
+                  <td>${this.escapeHtml(u.lastDate || '—')}</td>
+                </tr>
+              `).join('')}
             </tbody>
           </table>
         </div>
