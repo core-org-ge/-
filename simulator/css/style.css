@@ -2051,3 +2051,27 @@ body {
     justify-content: center;
   }
 }
+
+/* ==========================================================================
+   საინჟინრო და მათემატიკური ფორმულების მკაფიო ტიპოგრაფია
+   ========================================================================== */
+
+sub, sup {
+  font-size: 78%;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+
+sup {
+  top: -0.45em;
+}
+
+sub {
+  bottom: -0.22em;
+}
+
+.q-text, .opt-content, .rev-text, .rev-opt-text, .study-explanation-box {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cambria Math", "Noto Sans Georgian", "Arial Unicode MS", Arial, sans-serif;
+  line-height: 1.6;
+}
