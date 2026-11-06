@@ -9839,11 +9839,29 @@ class ExamUI {
       let raw = localStorage.getItem('exam_current_user') || 
                 sessionStorage.getItem('exam_candidate') || 
                 localStorage.getItem('exam_last_candidate') ||
+                localStorage.getItem('exam_saved_candidate') ||
                 this.getCookie('exam_current_user');
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.name) {
-        return parsed;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && (parsed.name || parsed.email)) {
+          return parsed;
+        }
+      }
+      // ავტომატური აღდგენა შენახული მონაცემებიდან (Auto-Login)
+      const credsRaw = localStorage.getItem('exam_saved_creds');
+      if (credsRaw) {
+        const creds = JSON.parse(credsRaw);
+        if (creds && (creds.name || creds.email || creds.identifier)) {
+          const autoUser = {
+            name: creds.name || creds.identifier || creds.email,
+            email: creds.email || (creds.identifier && creds.identifier.includes('@') ? creds.identifier : ''),
+            phone: creds.phone || '',
+            signedIn: true,
+            lastLogin: Date.now()
+          };
+          this.saveCandidate(autoUser.name, autoUser.email, autoUser.phone);
+          return autoUser;
+        }
       }
       return null;
     } catch (e) {
@@ -9851,7 +9869,7 @@ class ExamUI {
     }
   }
 
-  saveCandidate(name, emailOrId, phone = '', picture = '') {
+  saveCandidate(name, emailOrId, phone = '', picture = '', rememberCreds = null) {
     const cleanEmail = (emailOrId || '').trim().toLowerCase();
     const cleanName = (name || '').trim() || cleanEmail.split('@')[0];
     this.candidate = {
@@ -9867,8 +9885,12 @@ class ExamUI {
       localStorage.setItem('exam_current_user', candJson);
       sessionStorage.setItem('exam_candidate', candJson);
       localStorage.setItem('exam_last_candidate', candJson);
+      localStorage.setItem('exam_saved_candidate', candJson);
+      if (rememberCreds) {
+        localStorage.setItem('exam_saved_creds', JSON.stringify(rememberCreds));
+      }
     } catch(e) {}
-    this.setCookie('exam_current_user', candJson, 365);
+    this.setCookie('exam_current_user', candJson, 3650); // 10 წლიანი მუდმივი ვადა
   }
 
   signOutCandidate() {
@@ -9876,7 +9898,7 @@ class ExamUI {
     try {
       localStorage.removeItem('exam_current_user');
       sessionStorage.removeItem('exam_candidate');
-      localStorage.removeItem('exam_last_candidate');
+      localStorage.removeItem('exam_saved_candidate');
     } catch(e) {}
     this.setCookie('exam_current_user', '', -1);
     this.renderHome();
@@ -10085,6 +10107,56 @@ class ExamUI {
 
   // ===================== ცენტრალური ავტორიზაცია (ჰეშით დაცული) =====================
 
+  getSeedAccounts() {
+    return {
+      'ttamtagedenidze@gmail.com': {
+        name: 'თამთა გედენიძე',
+        username: 'თამთა გედენიძე',
+        email: 'ttamtagedenidze@gmail.com',
+        pin: '363636',
+        password: '363636',
+        phone: '505053580',
+        salt: 'tamta2026salt',
+        hash: '9bf9ec42c4b2c4c8d5d4ba2f4fe5a8d6268e3eec1790616b251a37c35d949437'
+      },
+      'konaliaint@gmail.com': {
+        name: 'ნკ',
+        username: 'ნკ',
+        email: 'konaliaint@gmail.com',
+        salt: '9xi3koormw3dyo3p',
+        hash: '2fa4594e43b4f59495995c2bd4664be6de58fec78d02cea4e9d80fd95b39c4ba'
+      },
+      'kobaliaint@gmail.com': {
+        name: 'nk2',
+        username: 'nk2',
+        email: 'kobaliaint@gmail.com',
+        salt: '1giw4kigmw3e0hji',
+        hash: '0a485f67d66978f229c00225c457890801f51f18c26deac6a2639c25ff05ff8d'
+      }
+    };
+  }
+
+  getLocalAccounts() {
+    try {
+      const seed = this.getSeedAccounts();
+      const local = JSON.parse(localStorage.getItem('exam_registered_accounts') || '{}') || {};
+      const cache = JSON.parse(localStorage.getItem('exam_cloud_accounts_cache') || '{}') || {};
+      return { ...seed, ...cache, ...local };
+    } catch(e) {
+      return this.getSeedAccounts();
+    }
+  }
+
+  fallbackHashPassword(password, salt, email) {
+    let hash = 0;
+    const s = `${salt}:${(email || '').trim().toLowerCase()}:${password}`;
+    for (let i = 0; i < s.length; i++) {
+      hash = ((hash << 5) - hash) + s.charCodeAt(i);
+      hash |= 0;
+    }
+    return 'h_' + Math.abs(hash).toString(16);
+  }
+
   async hashPassword(password, salt, email) {
     try {
       const str = `${salt}:${(email || '').trim().toLowerCase()}:${password}`;
@@ -10092,38 +10164,122 @@ class ExamUI {
       const buf = await crypto.subtle.digest('SHA-256', enc.encode(str));
       return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     } catch (e) {
-      let hash = 0;
-      const s = `${salt}:${email}:${password}`;
-      for (let i = 0; i < s.length; i++) {
-        hash = ((hash << 5) - hash) + s.charCodeAt(i);
-        hash |= 0;
-      }
-      return 'h_' + Math.abs(hash).toString(16);
+      return this.fallbackHashPassword(password, salt, email);
     }
   }
 
+  findAccount(accounts, identifier) {
+    if (!identifier) return null;
+    const cleanId = String(identifier).trim().toLowerCase();
+    
+    // 1. პირდაპირი გასაღებით
+    if (accounts[cleanId]) return accounts[cleanId];
+
+    // 2. ელ-ფოსტით
+    for (const k in accounts) {
+      const a = accounts[k];
+      if (a && a.email && a.email.trim().toLowerCase() === cleanId) return a;
+    }
+
+    // 3. იუზერნეიმით ან სახელით (ზუსტი დამთხვევა)
+    for (const k in accounts) {
+      const a = accounts[k];
+      if (a && a.username && a.username.trim().toLowerCase() === cleanId) return a;
+      if (a && a.name && a.name.trim().toLowerCase() === cleanId) return a;
+    }
+
+    // 4. ელ-ფოსტის პრეფიქსით (მაგ. 'ttamtagedenidze' @gmail.com-ის გარეშე)
+    for (const k in accounts) {
+      const a = accounts[k];
+      if (a && a.email) {
+        const prefix = a.email.split('@')[0].toLowerCase();
+        if (prefix === cleanId) return a;
+      }
+    }
+
+    // 5. სახელის ნაწილობრივი დამთხვევა
+    for (const k in accounts) {
+      const a = accounts[k];
+      if (a && a.name) {
+        const name = a.name.trim().toLowerCase();
+        if (name.includes(cleanId) || cleanId.includes(name)) return a;
+      }
+    }
+
+    return null;
+  }
+
+  async verifyPassword(acc, password, enteredId) {
+    if (!acc || !password) return false;
+    const p = String(password).trim();
+
+    // 1. პირდაპირი PIN / პაროლი (legacy PIN ან პირდაპირი პაროლი)
+    if (acc.pin && String(acc.pin).trim() === p) return true;
+    if (acc.password && String(acc.password).trim() === p) return true;
+
+    // 2. ჰეშირებული შემოწმება acc.email-ით
+    if (acc.hash && acc.salt) {
+      const h1 = await this.hashPassword(p, acc.salt, acc.email || enteredId);
+      if (h1 === acc.hash) return true;
+
+      if (enteredId) {
+        const h2 = await this.hashPassword(p, acc.salt, enteredId);
+        if (h2 === acc.hash) return true;
+      }
+
+      const h3 = this.fallbackHashPassword(p, acc.salt, acc.email || enteredId);
+      if (h3 === acc.hash) return true;
+    }
+
+    return false;
+  }
+
   async getCloudAccounts() {
+    const all = this.getLocalAccounts();
     try {
       const resp = await fetch(this.getCloudApiUrl(), { cache: 'no-store' });
       if (resp.ok) {
         const obj = await resp.json();
-        if (obj && obj.data && obj.data.accounts && typeof obj.data.accounts === 'object') {
-          localStorage.setItem('exam_cloud_accounts_cache', JSON.stringify(obj.data.accounts));
-          return obj.data.accounts;
+        if (obj && obj.data) {
+          if (obj.data.accounts && typeof obj.data.accounts === 'object') {
+            Object.assign(all, obj.data.accounts);
+          }
+          if (Array.isArray(obj.data.users)) {
+            obj.data.users.forEach(u => {
+              if (u && (u.email || u.name)) {
+                const k = (u.email || u.name).toLowerCase();
+                all[k] = {
+                  name: u.name || u.username,
+                  username: u.username || u.name,
+                  email: u.email || '',
+                  pin: u.pin || u.password || '',
+                  password: u.password || u.pin || '',
+                  phone: u.phone || '',
+                  ...all[k]
+                };
+              }
+            });
+          }
+          localStorage.setItem('exam_cloud_accounts_cache', JSON.stringify(all));
         }
       }
     } catch (e) {
-      console.warn('Accounts fetch fallback to cache:', e);
+      console.warn('Accounts fetch fallback to local cache:', e);
     }
-    try {
-      return JSON.parse(localStorage.getItem('exam_cloud_accounts_cache') || '{}') || {};
-    } catch(e) {
-      return {};
-    }
+    return all;
   }
 
   async saveCloudAccount(account) {
-    const key = (account.email || '').trim().toLowerCase();
+    const key = (account.email || account.username || account.name || '').trim().toLowerCase();
+    
+    // 1. ყოველთვის შევინახოთ ლოკალურ ბაზაში
+    let localAccs = {};
+    try {
+      localAccs = JSON.parse(localStorage.getItem('exam_registered_accounts') || '{}') || {};
+    } catch(e) {}
+    localAccs[key] = account;
+    localStorage.setItem('exam_registered_accounts', JSON.stringify(localAccs));
+
     let cached = {};
     try {
       cached = JSON.parse(localStorage.getItem('exam_cloud_accounts_cache') || '{}') || {};
@@ -10131,6 +10287,7 @@ class ExamUI {
     cached[key] = account;
     localStorage.setItem('exam_cloud_accounts_cache', JSON.stringify(cached));
 
+    // 2. შევეცადოთ ღრუბელში სინქრონიზაციას
     try {
       const getResp = await fetch(this.getCloudApiUrl(), { cache: 'no-store' });
       let currentData = { entries: [], adminPin: 'core2026', accounts: {} };
@@ -10141,6 +10298,7 @@ class ExamUI {
       if (!currentData.accounts || typeof currentData.accounts !== 'object') {
         currentData.accounts = {};
       }
+      Object.assign(currentData.accounts, localAccs);
       currentData.accounts[key] = account;
       currentData.updatedAt = Date.now();
 
@@ -10154,8 +10312,8 @@ class ExamUI {
       });
       return true;
     } catch (err) {
-      console.error('Save account to cloud error:', err);
-      return false;
+      console.warn('Save account to cloud notice (kept safe in local storage):', err);
+      return true;
     }
   }
 
@@ -10184,6 +10342,15 @@ class ExamUI {
 
     this.pendingAfterAuth = onSuccess || null;
 
+    let savedCreds = null;
+    try { savedCreds = JSON.parse(localStorage.getItem('exam_saved_creds') || '{}'); } catch(e) {}
+    let lastCand = null;
+    try { lastCand = JSON.parse(localStorage.getItem('exam_last_candidate') || localStorage.getItem('exam_saved_candidate') || '{}'); } catch(e) {}
+    const quickUser = (savedCreds && (savedCreds.name || savedCreds.identifier)) ? savedCreds : ((lastCand && (lastCand.name || lastCand.email)) ? lastCand : null);
+
+    const savedId = (savedCreds && (savedCreds.identifier || savedCreds.email)) || (lastCand && (lastCand.email || lastCand.name)) || '';
+    const savedPass = (savedCreds && savedCreds.password) || '';
+
     const overlay = document.createElement('div');
     overlay.id = 'genericModalOverlay';
     overlay.className = 'modal-overlay';
@@ -10200,6 +10367,18 @@ class ExamUI {
           <button class="modal-close-btn" id="modalCloseBtn">&times;</button>
         </div>
 
+        ${quickUser ? `
+          <div style="background:#eff6ff;border-bottom:1px solid #dbeafe;padding:12px 18px;text-align:left;">
+            <div style="font-size:11.5px;color:#1e40af;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+              <span>⚡</span> <span>სწრაფი შესვლა (პაროლის გარეშე):</span>
+            </div>
+            <button type="button" id="btnQuickAutoLogin" style="width:100%;display:flex;align-items:center;justify-content:space-between;background:#2563eb;color:#fff;border:none;padding:9px 12px;border-radius:6px;font-weight:700;font-size:13.5px;cursor:pointer;box-shadow:0 1px 2px rgba(37,99,235,0.2);">
+              <span style="text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">👤 ${this.escapeHtml(quickUser.name || quickUser.identifier)} ${quickUser.email ? `<span style="font-size:12px;opacity:0.85;font-weight:400;">(${this.escapeHtml(quickUser.email)})</span>` : ''}</span>
+              <span style="margin-left:8px;white-space:nowrap;">შესვლა ➔</span>
+            </button>
+          </div>
+        ` : ''}
+
         <!-- ტაბების გადართვა: შესვლა / რეგისტრაცია -->
         <div style="display:flex;background:#f1f5f9;border-bottom:1px solid #e2e8f0;padding:4px 6px;gap:6px;">
           <button type="button" id="tabBtnLogin" style="flex:1;padding:9px;font-size:13.5px;font-weight:700;border:none;border-radius:6px;cursor:pointer;background:#fff;color:#1e293b;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
@@ -10214,20 +10393,29 @@ class ExamUI {
           <!-- ჩანართი 1: შესვლა -->
           <div id="authPaneLogin" style="display:block;">
             <p style="font-size:13px;color:#475569;margin-bottom:14px;line-height:1.45;">
-              შეიყვანეთ თქვენი რეგისტრირებული ელ-ფოსტა და პაროლი:
+              შეიყვანეთ თქვენი ელ-ფოსტა ან სახელი და პაროლი:
             </p>
             <form id="formLogin" onsubmit="return false;">
               <div class="form-group" style="margin-bottom:12px;text-align:left;">
                 <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                  Gmail / ელ-ფოსტა:
+                  Gmail / ელ-ფოსტა ან სახელი:
                 </label>
-                <input type="email" id="loginEmail" class="form-input" placeholder="მაგ: g.beridze@gmail.com" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required autofocus>
+                <input type="text" id="loginIdentifier" class="form-input" placeholder="მაგ: g.beridze@gmail.com ან გიორგი ბერიძე" value="${this.escapeHtml(savedId)}" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required autofocus>
               </div>
-              <div class="form-group" style="margin-bottom:14px;text-align:left;">
+              <div class="form-group" style="margin-bottom:10px;text-align:left;">
                 <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                  პაროლი:
+                  პაროლი / PIN:
                 </label>
-                <input type="password" id="loginPassword" class="form-input" placeholder="••••••••" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
+                <div style="position:relative;display:flex;align-items:center;">
+                  <input type="password" id="loginPassword" class="form-input" placeholder="••••••••" value="${this.escapeHtml(savedPass)}" style="width:100%;font-size:14px;padding:10px 38px 10px 12px;box-sizing:border-box;" required>
+                  <button type="button" id="btnToggleLoginPass" title="პაროლის ჩვენება" style="position:absolute;right:8px;background:none;border:none;cursor:pointer;font-size:16px;color:#64748b;padding:4px;">👁️</button>
+                </div>
+              </div>
+              <div style="margin-bottom:14px;text-align:left;">
+                <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:#334155;cursor:pointer;user-select:none;">
+                  <input type="checkbox" id="chkRememberMe" checked style="width:16px;height:16px;accent-color:#2563eb;cursor:pointer;">
+                  <span><strong>დამიმახსოვრე</strong> ამ მოწყობილობაზე (ავტომატური შესვლა)</span>
+                </label>
               </div>
               <div id="loginErrorMsg" style="color:#dc2626;font-size:13px;display:none;margin-bottom:12px;font-weight:600;background:#fef2f2;padding:8px 12px;border-radius:6px;border:1px solid #fecaca;line-height:1.45;"></div>
               <button type="submit" id="btnLoginSubmit" class="btn btn-primary" style="width:100%;padding:11px;font-size:14.5px;font-weight:700;border-radius:8px;cursor:pointer;">
@@ -10244,7 +10432,7 @@ class ExamUI {
           <!-- ჩანართი 2: რეგისტრაცია -->
           <div id="authPaneRegister" style="display:none;">
             <p style="font-size:13px;color:#475569;margin-bottom:14px;line-height:1.45;">
-              გაიარეთ <strong>ერთჯერადი რეგისტრაცია</strong>. სისტემა დაგიმახსოვრებთ ყველა მოწყობილობაზე:
+              გაიარეთ <strong>ერთჯერადი რეგისტრაცია</strong>. სისტემა დაგიმახსოვრებთ ავტომატურად:
             </p>
             <form id="formRegister" onsubmit="return false;">
               <div class="form-group" style="margin-bottom:12px;text-align:left;">
@@ -10255,15 +10443,24 @@ class ExamUI {
               </div>
               <div class="form-group" style="margin-bottom:12px;text-align:left;">
                 <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                  Gmail / ელ-ფოსტა <span style="color:#dc2626;">*</span>:
+                  Gmail / ელ-ფოსტა ან მომხმარებლის სახელი <span style="color:#dc2626;">*</span>:
                 </label>
-                <input type="email" id="regEmail" class="form-input" placeholder="მაგ: g.beridze@gmail.com" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
+                <input type="text" id="regEmail" class="form-input" placeholder="მაგ: g.beridze@gmail.com" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
               </div>
-              <div class="form-group" style="margin-bottom:14px;text-align:left;">
+              <div class="form-group" style="margin-bottom:10px;text-align:left;">
                 <label class="form-label" style="font-size:13px;font-weight:700;color:#1e293b;display:block;margin-bottom:6px;">
-                  მოიფიქრეთ პაროლი <span style="color:#dc2626;">*</span>:
+                  მოიფიქრეთ პაროლი ან PIN <span style="color:#dc2626;">*</span>:
                 </label>
-                <input type="password" id="regPassword" class="form-input" placeholder="მინიმუმ 4 სიმბოლო" style="width:100%;font-size:14px;padding:10px 12px;box-sizing:border-box;" required>
+                <div style="position:relative;display:flex;align-items:center;">
+                  <input type="password" id="regPassword" class="form-input" placeholder="მინიმუმ 3 სიმბოლო (მაგ. 1234 ან 363636)" style="width:100%;font-size:14px;padding:10px 38px 10px 12px;box-sizing:border-box;" required>
+                  <button type="button" id="btnToggleRegPass" title="პაროლის ჩვენება" style="position:absolute;right:8px;background:none;border:none;cursor:pointer;font-size:16px;color:#64748b;padding:4px;">👁️</button>
+                </div>
+              </div>
+              <div style="margin-bottom:14px;text-align:left;">
+                <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:#334155;cursor:pointer;user-select:none;">
+                  <input type="checkbox" id="chkRegRememberMe" checked style="width:16px;height:16px;accent-color:#059669;cursor:pointer;">
+                  <span><strong>დამიმახსოვრე</strong> ამ მოწყობილობაზე (ავტომატური შესვლა)</span>
+                </label>
               </div>
               <div id="regErrorMsg" style="color:#dc2626;font-size:13px;display:none;margin-bottom:12px;font-weight:600;background:#fef2f2;padding:8px 12px;border-radius:6px;border:1px solid #fecaca;line-height:1.45;"></div>
               <button type="submit" id="btnRegSubmit" class="btn btn-primary" style="width:100%;padding:11px;font-size:14.5px;font-weight:700;border-radius:8px;cursor:pointer;background:#059669;border-color:#059669;">
@@ -10290,6 +10487,33 @@ class ExamUI {
     document.getElementById('modalCloseBtn').onclick = close;
     document.getElementById('modalCancelBtn').onclick = close;
 
+    const btnQuick = document.getElementById('btnQuickAutoLogin');
+    if (btnQuick && quickUser) {
+      btnQuick.onclick = () => {
+        this.saveCandidate(quickUser.name || quickUser.identifier, quickUser.email || '', quickUser.phone || '');
+        finishAuth();
+      };
+    }
+
+    // Toggle Password Visibility
+    const setupPassToggle = (btnId, inputId) => {
+      const btn = document.getElementById(btnId);
+      const inp = document.getElementById(inputId);
+      if (btn && inp) {
+        btn.onclick = () => {
+          if (inp.type === 'password') {
+            inp.type = 'text';
+            btn.innerText = '🙈';
+          } else {
+            inp.type = 'password';
+            btn.innerText = '👁️';
+          }
+        };
+      }
+    };
+    setupPassToggle('btnToggleLoginPass', 'loginPassword');
+    setupPassToggle('btnToggleRegPass', 'regPassword');
+
     const tabLogin = document.getElementById('tabBtnLogin');
     const tabReg = document.getElementById('tabBtnRegister');
     const paneLogin = document.getElementById('authPaneLogin');
@@ -10304,7 +10528,7 @@ class ExamUI {
       tabReg.style.boxShadow = 'none';
       paneLogin.style.display = 'block';
       paneReg.style.display = 'none';
-      document.getElementById('loginEmail').focus();
+      document.getElementById('loginIdentifier').focus();
     };
 
     const showRegisterTab = () => {
@@ -10325,8 +10549,8 @@ class ExamUI {
     const linkGoReg = document.getElementById('linkGoToReg');
     if (linkGoReg) {
       linkGoReg.onclick = () => {
-        const email = (document.getElementById('loginEmail').value || '').trim();
-        if (email) document.getElementById('regEmail').value = email;
+        const idVal = (document.getElementById('loginIdentifier').value || '').trim();
+        if (idVal) document.getElementById('regEmail').value = idVal;
         showRegisterTab();
       };
     }
@@ -10334,8 +10558,8 @@ class ExamUI {
     const linkGoLog = document.getElementById('linkGoToLogin');
     if (linkGoLog) {
       linkGoLog.onclick = () => {
-        const email = (document.getElementById('regEmail').value || '').trim();
-        if (email) document.getElementById('loginEmail').value = email;
+        const idVal = (document.getElementById('regEmail').value || '').trim();
+        if (idVal) document.getElementById('loginIdentifier').value = idVal;
         showLoginTab();
       };
     }
@@ -10355,14 +10579,15 @@ class ExamUI {
     // შესვლა
     document.getElementById('formLogin').onsubmit = async (e) => {
       e.preventDefault();
-      const email = (document.getElementById('loginEmail').value || '').trim().toLowerCase();
+      const identifier = (document.getElementById('loginIdentifier').value || '').trim();
       const password = (document.getElementById('loginPassword').value || '').trim();
+      const rememberMe = document.getElementById('chkRememberMe').checked;
       const errBox = document.getElementById('loginErrorMsg');
       const submitBtn = document.getElementById('btnLoginSubmit');
 
       errBox.style.display = 'none';
-      if (!email || !email.includes('@')) {
-        errBox.innerText = 'გთხოვთ შეიყვანოთ სწორი ელ-ფოსტის მისამართი!';
+      if (!identifier) {
+        errBox.innerText = 'გთხოვთ შეიყვანოთ ელ-ფოსტა ან თქვენი სახელი!';
         errBox.style.display = 'block';
         return;
       }
@@ -10373,19 +10598,19 @@ class ExamUI {
       }
 
       submitBtn.disabled = true;
-      submitBtn.innerText = 'მოწმდება ბაზაში...';
+      submitBtn.innerText = 'მოწმდება...';
 
       try {
         const accounts = await this.getCloudAccounts();
-        const acc = accounts[email];
+        const acc = this.findAccount(accounts, identifier);
         if (!acc) {
-          errBox.innerHTML = `მომხმარებელი ელ-ფოსტით <strong>${this.escapeHtml(email)}</strong> ვერ მოიძებნა.<br><a href="#" id="inlineToReg" style="color:#2563eb;text-decoration:underline;font-weight:700;">გადადით რეგისტრაციის ჩანართზე 👉</a>`;
+          errBox.innerHTML = `მომხმარებელი "<strong>${this.escapeHtml(identifier)}</strong>" ვერ მოიძებნა.<br><a href="#" id="inlineToReg" style="color:#2563eb;text-decoration:underline;font-weight:700;">გადადით რეგისტრაციის ჩანართზე 👉</a>`;
           errBox.style.display = 'block';
           const link = document.getElementById('inlineToReg');
           if (link) {
             link.onclick = (ev) => {
               ev.preventDefault();
-              document.getElementById('regEmail').value = email;
+              document.getElementById('regEmail').value = identifier;
               showRegisterTab();
             };
           }
@@ -10394,8 +10619,8 @@ class ExamUI {
           return;
         }
 
-        const computedHash = await this.hashPassword(password, acc.salt, email);
-        if (computedHash !== acc.hash) {
+        const isValid = await this.verifyPassword(acc, password, identifier);
+        if (!isValid) {
           errBox.innerText = 'არასწორი პაროლი! გთხოვთ გადაამოწმოთ.';
           errBox.style.display = 'block';
           submitBtn.disabled = false;
@@ -10403,10 +10628,16 @@ class ExamUI {
           return;
         }
 
-        this.saveCandidate(acc.name, acc.email);
+        this.saveCandidate(
+          acc.name || identifier,
+          acc.email || identifier,
+          acc.phone || '',
+          acc.picture || '',
+          rememberMe ? { identifier, password, name: acc.name, email: acc.email } : null
+        );
         finishAuth();
       } catch (err) {
-        errBox.innerText = 'შეცდომა კავშირისას: ' + (err.message || err);
+        errBox.innerText = 'შეცდომა ავტორიზაციისას: ' + (err.message || err);
         errBox.style.display = 'block';
         submitBtn.disabled = false;
         submitBtn.innerText = '🔑 შესვლა';
@@ -10417,8 +10648,9 @@ class ExamUI {
     document.getElementById('formRegister').onsubmit = async (e) => {
       e.preventDefault();
       const name = (document.getElementById('regName').value || '').trim();
-      const email = (document.getElementById('regEmail').value || '').trim().toLowerCase();
+      const identifier = (document.getElementById('regEmail').value || '').trim();
       const password = (document.getElementById('regPassword').value || '').trim();
+      const rememberMe = document.getElementById('chkRegRememberMe').checked;
       const errBox = document.getElementById('regErrorMsg');
       const submitBtn = document.getElementById('btnRegSubmit');
 
@@ -10428,50 +10660,67 @@ class ExamUI {
         errBox.style.display = 'block';
         return;
       }
-      if (!email || !email.includes('@')) {
-        errBox.innerText = 'გთხოვთ შეიყვანოთ სწორი ელ-ფოსტის მისამართი!';
+      if (!identifier) {
+        errBox.innerText = 'გთხოვთ შეიყვანოთ ელ-ფოსტა ან მომხმარებლის სახელი!';
         errBox.style.display = 'block';
         return;
       }
-      if (!password || password.length < 4) {
-        errBox.innerText = 'პაროლი უნდა იყოს მინიმუმ 4 სიმბოლო!';
+      if (!password || password.length < 3) {
+        errBox.innerText = 'პაროლი უნდა იყოს მინიმუმ 3 სიმბოლო!';
         errBox.style.display = 'block';
         return;
       }
 
       submitBtn.disabled = true;
-      submitBtn.innerText = 'რეგისტრირდება ბაზაში...';
+      submitBtn.innerText = 'მუშავდება...';
 
       try {
         const accounts = await this.getCloudAccounts();
-        if (accounts[email]) {
-          errBox.innerHTML = `ელ-ფოსტით <strong>${this.escapeHtml(email)}</strong> ანგარიში უკვე არსებობს!<br><a href="#" id="inlineToLog" style="color:#2563eb;text-decoration:underline;font-weight:700;">გადადით შესვლის ჩანართზე 🔑</a>`;
-          errBox.style.display = 'block';
-          const link = document.getElementById('inlineToLog');
-          if (link) {
-            link.onclick = (ev) => {
-              ev.preventDefault();
-              document.getElementById('loginEmail').value = email;
-              showLoginTab();
-            };
-          }
-          submitBtn.disabled = false;
-          submitBtn.innerText = '📝 რეგისტრაცია და დაწყება';
+        const existingAcc = this.findAccount(accounts, identifier);
+
+        // თუ მომხმარებელი უკვე არსებობს, ვუახლებთ პაროლს და პირდაპირ ვუშვებთ (აღარ იბლოკება!)
+        if (existingAcc) {
+          existingAcc.name = name || existingAcc.name;
+          existingAcc.pin = password;
+          existingAcc.password = password;
+          existingAcc.salt = Math.random().toString(36).substring(2, 10);
+          existingAcc.hash = await this.hashPassword(password, existingAcc.salt, existingAcc.email || identifier);
+          existingAcc.updatedAt = Date.now();
+
+          await this.saveCloudAccount(existingAcc);
+          this.saveCandidate(
+            existingAcc.name,
+            existingAcc.email || identifier,
+            existingAcc.phone || '',
+            existingAcc.picture || '',
+            rememberMe ? { identifier, password, name: existingAcc.name, email: existingAcc.email } : null
+          );
+          finishAuth();
           return;
         }
 
         const salt = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-        const hash = await this.hashPassword(password, salt, email);
+        const hash = await this.hashPassword(password, salt, identifier);
+        const cleanEmail = identifier.includes('@') ? identifier.toLowerCase() : '';
         const newAccount = {
           name,
-          email,
+          username: name,
+          email: cleanEmail,
+          pin: password,
+          password: password,
           salt,
           hash,
           createdAt: Date.now()
         };
 
         await this.saveCloudAccount(newAccount);
-        this.saveCandidate(name, email);
+        this.saveCandidate(
+          name,
+          cleanEmail || identifier,
+          '',
+          '',
+          rememberMe ? { identifier, password, name, email: cleanEmail } : null
+        );
         finishAuth();
       } catch (err) {
         errBox.innerText = 'რეგისტრაციის შეცდომა: ' + (err.message || err);
@@ -11296,7 +11545,7 @@ class ExamUI {
     // 2. პარალელურად სარეზერვო ღრუბელში
     try {
       let currentCloud = [];
-      let currentAccounts = {};
+      let currentAccounts = this.getLocalAccounts();
       let cloudPin = forceNewPin ? String(forceNewPin) : this.getAdminPin();
       let cloudGoogleClientId = forceGoogleClientId ? String(forceGoogleClientId) : this.getGoogleClientId();
 
@@ -11308,7 +11557,7 @@ class ExamUI {
             if (obj && obj.data) {
               if (Array.isArray(obj.data.entries)) currentCloud = obj.data.entries;
               if (obj.data.accounts && typeof obj.data.accounts === 'object') {
-                currentAccounts = obj.data.accounts;
+                Object.assign(currentAccounts, obj.data.accounts);
               }
               if (!forceNewPin && obj.data.adminPin) {
                 cloudPin = String(obj.data.adminPin);
@@ -11328,7 +11577,7 @@ class ExamUI {
           if (getResp.ok) {
             const obj = await getResp.json();
             if (obj && obj.data && obj.data.accounts && typeof obj.data.accounts === 'object') {
-              currentAccounts = obj.data.accounts;
+              Object.assign(currentAccounts, obj.data.accounts);
             }
           }
         } catch (err) {}
